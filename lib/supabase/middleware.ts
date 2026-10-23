@@ -60,6 +60,16 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
+  // In local development with placeholder Supabase credentials, allow dashboard preview
+  const isPlaceholderSupabase =
+    !process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL.includes("placeholder") ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL.includes("your-project");
+
+  if (process.env.NODE_ENV === "development" && isPlaceholderSupabase) {
+    return response;
+  }
+
   // Protect /dashboard and /admin routes if not authenticated
   if (
     !user &&

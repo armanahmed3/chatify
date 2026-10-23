@@ -163,6 +163,21 @@ export default function LoginPage() {
           </svg>
           Google Account
         </Button>
+
+        <div className="mt-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              setEmail("demo@chatify.ai");
+              setPassword("password123");
+              router.push("/dashboard");
+            }}
+            className="w-full h-9 text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30"
+          >
+            ⚡ Quick 1-Click Demo Login (Instant Dashboard)
+          </Button>
+        </div>
       </CardContent>
       <CardFooter className="justify-center border-t border-border/40 py-4 text-xs text-muted-foreground">
         Don&apos;t have an account?{" "}
