@@ -224,13 +224,14 @@ export async function routeAiCompletion(
     errors.push(`Tier 1 (Gemini): ${err.message}`);
   }
 
-  // Tier 2: Groq LLaMA 3.1 8B Instant (Free)
+  // Tier 2: Groq OpenAI GPT-OSS 120B / LLaMA 3.1 (Free)
   try {
-    const text = await callGroq(messages, "llama-3.1-8b-instant", options);
+    const groqModel = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+    const text = await callGroq(messages, groqModel, options);
     if (text) {
       return {
         text,
-        provider: "Groq LLaMA 3.1 8B (Free)",
+        provider: "Groq GPT-OSS 120B (Free)",
         inputTokens: 320,
         outputTokens: Math.round(text.length / 4),
         wasLlmCall: true,
@@ -238,16 +239,17 @@ export async function routeAiCompletion(
       };
     }
   } catch (err: any) {
-    errors.push(`Tier 2 (Groq 8B): ${err.message}`);
+    errors.push(`Tier 2 (Groq Primary): ${err.message}`);
   }
 
-  // Tier 3: Groq LLaMA 3.3 70B (Free)
+  // Tier 3: Groq Fast Tier (GPT-OSS 20B / LLaMA 3.3 70B) (Free)
   try {
-    const text = await callGroq(messages, "llama-3.3-70b-versatile", options);
+    const groqFallbackModel = process.env.GROQ_FALLBACK_MODEL || "openai/gpt-oss-20b";
+    const text = await callGroq(messages, groqFallbackModel, options);
     if (text) {
       return {
         text,
-        provider: "Groq LLaMA 3.3 70B (Free)",
+        provider: "Groq Fast Tier (Free)",
         inputTokens: 350,
         outputTokens: Math.round(text.length / 4),
         wasLlmCall: true,
@@ -255,7 +257,7 @@ export async function routeAiCompletion(
       };
     }
   } catch (err: any) {
-    errors.push(`Tier 3 (Groq 70B): ${err.message}`);
+    errors.push(`Tier 3 (Groq Fallback): ${err.message}`);
   }
 
   // Tier 4: Cloudflare Workers AI (Free)
