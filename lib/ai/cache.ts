@@ -50,14 +50,45 @@ export async function lookupSemanticCache(
 ): Promise<CacheEntry | null> {
   const normalizedQuery = query.toLowerCase().trim();
 
-  // 1. Check exact string matches
+  // 1. Try Upstash Redis exact match
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (redisUrl && redisToken && !redisUrl.includes("your-redis")) {
+    try {
+      const hexKey = Buffer.from(normalizedQuery).toString("hex").substring(0, 64);
+      const res = await fetch(redisUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(["GET", `faq:${hexKey}`]),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.result) {
+          try {
+            const parsed = typeof data.result === "string" ? JSON.parse(data.result) : data.result;
+            return parsed;
+          } catch {
+            // format parse error fallback
+          }
+        }
+      }
+    } catch {
+      // Redis network fallback
+    }
+  }
+
+  // 2. Check local exact string matches
   for (const entry of localSemanticCache) {
     if (entry.query.toLowerCase().trim() === normalizedQuery) {
       return entry;
     }
   }
 
-  // 2. Check semantic similarity if query vector is provided
+  // 3. Check semantic similarity if query vector is provided
   if (queryEmbedding.length > 0) {
     for (const entry of localSemanticCache) {
       if (entry.embedding && entry.embedding.length > 0) {
@@ -72,17 +103,38 @@ export async function lookupSemanticCache(
   return null;
 }
 
-export function saveSemanticCache(
+export async function saveSemanticCache(
   query: string,
   answer: string,
   embedding: number[],
   citations: Array<{ title: string; url?: string; snippet?: string }>
 ) {
-  localSemanticCache.push({
+  const entry: CacheEntry = {
     query,
     answer,
     embedding,
     citations,
     timestamp: Date.now(),
-  });
+  };
+
+  localSemanticCache.push(entry);
+
+  const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+  const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  if (redisUrl && redisToken && !redisUrl.includes("your-redis")) {
+    try {
+      const hexKey = Buffer.from(query.toLowerCase().trim()).toString("hex").substring(0, 64);
+      await fetch(redisUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${redisToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(["SET", `faq:${hexKey}`, JSON.stringify(entry)]),
+      });
+    } catch {
+      // Non-blocking cache write
+    }
+  }
 }
