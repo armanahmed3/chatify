@@ -62,10 +62,11 @@ export async function POST(
     const resendApiKey = process.env.RESEND_API_KEY;
     if (resendApiKey && score === "hot") {
       try {
-        const resend = new Resend(resendApiKey);
+        const sender = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
+        const recipient = process.env.OWNER_ALERT_EMAIL || "flexfitfury9@gmail.com";
         await resend.emails.send({
-          from: process.env.RESEND_FROM_EMAIL || "notifications@chatify.ai",
-          to: "owner@yourbusiness.com",
+          from: sender,
+          to: recipient,
           subject: `🔥 [Hot Lead Alert] ${name} wants an appointment!`,
           html: `
             <h2>New Hot Customer Lead Captured</h2>
