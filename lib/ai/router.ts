@@ -131,8 +131,9 @@ async function callCloudflareWorkersAI(
   const timeout = setTimeout(() => controller.abort(), 6000);
 
   try {
+    const cfModel = process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.1-8b-instruct";
     const res = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/meta/llama-3.3-70b-instruct`,
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${cfModel}`,
       {
         method: "POST",
         headers: {

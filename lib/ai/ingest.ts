@@ -73,6 +73,33 @@ export function chunkText(
  * Uses Cloudflare BAAI bge-base or Google Gemini text-embedding-004
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
+  const cfAccount = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const cfToken = process.env.CLOUDFLARE_API_TOKEN;
+
+  if (cfAccount && cfToken) {
+    try {
+      const cfRes = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${cfAccount}/ai/run/@cf/baai/bge-base-en-v1.5`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${cfToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ text: [text] }),
+        }
+      );
+      if (cfRes.ok) {
+        const cfData = await cfRes.json();
+        if (cfData.result?.data?.[0]) {
+          return cfData.result.data[0];
+        }
+      }
+    } catch (err) {
+      // Fall through to Gemini or fallback
+    }
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (apiKey) {
