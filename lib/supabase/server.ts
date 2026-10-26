@@ -14,21 +14,18 @@ export function createClient() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder-anon-key",
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
+        getAll() {
+          return typeof cookieStore.getAll === "function" ? cookieStore.getAll() : [];
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
           try {
-            cookieStore.set({ name, value, ...options });
-          } catch (error) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              if (typeof cookieStore.set === "function") {
+                cookieStore.set(name, value, options);
+              }
+            });
+          } catch {
             // Server Component cookie set error caught safely
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: "", ...options });
-          } catch (error) {
-            // Server Component cookie remove error caught safely
           }
         },
       },

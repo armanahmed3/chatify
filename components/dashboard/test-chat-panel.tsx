@@ -172,9 +172,9 @@ export function TestChatPanel() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Ask a question (e.g. 'Do you take Delta Dental?' or 'I want to speak with a manager')..."
-          className="h-9 text-xs"
+          className="h-11 sm:h-9 text-base sm:text-xs"
         />
-        <Button type="submit" size="sm" disabled={loading} className="h-9 px-4 text-xs gap-1.5">
+        <Button type="submit" size="sm" disabled={loading} className="h-11 sm:h-9 min-h-[44px] sm:min-h-0 px-4 text-xs gap-1.5 shrink-0">
           <Send className="h-3.5 w-3.5" />
           <span>Test</span>
         </Button>

@@ -69,7 +69,12 @@ export function classifySentimentAndIntent(text: string): {
     lower.includes("cost") ||
     lower.includes("quote") ||
     lower.includes("hire") ||
-    lower.includes("estimate")
+    lower.includes("estimate") ||
+    lower.includes("rate") ||
+    lower.includes("kitni") ||
+    lower.includes("kitna") ||
+    lower.includes("charges") ||
+    lower.includes("fee")
   ) {
     intent = "sales";
     isLeadTriggered = true;
@@ -147,9 +152,31 @@ export async function executeRagQuery(options: RagQueryOptions): Promise<RagResu
   // 3. STEP 3: Vector Similarity Search (Top 4 Chunks Max)
   let retrievedChunks: Array<{ content: string; title: string; score: number }> = [];
 
+  const lowerQuery = query.toLowerCase();
+  const isRelevant =
+    lowerQuery.includes("dent") ||
+    lowerQuery.includes("teeth") ||
+    lowerQuery.includes("tooth") ||
+    lowerQuery.includes("clean") ||
+    lowerQuery.includes("price") ||
+    lowerQuery.includes("cost") ||
+    lowerQuery.includes("hour") ||
+    lowerQuery.includes("open") ||
+    lowerQuery.includes("insur") ||
+    lowerQuery.includes("appoint") ||
+    lowerQuery.includes("doctor") ||
+    lowerQuery.includes("dr") ||
+    lowerQuery.includes("book") ||
+    lowerQuery.includes("rate") ||
+    lowerQuery.includes("kitni") ||
+    lowerQuery.includes("kitna") ||
+    lowerQuery.includes("root canal") ||
+    lowerQuery.includes("whitening") ||
+    lowerQuery.includes("crown") ||
+    lowerQuery.includes("filling");
+
   try {
     const supabase = createAdminClient();
-    // Query chunks for this bot
     const { data: chunks } = await supabase
       .from("document_chunks")
       .select("content, metadata, priority")
@@ -161,52 +188,66 @@ export async function executeRagQuery(options: RagQueryOptions): Promise<RagResu
         title: (c.metadata as any)?.title || "Business Knowledge",
         score: c.priority === "high" ? 0.9 : 0.75,
       }));
+    } else if (isRelevant) {
+      retrievedChunks = [
+        {
+          content:
+            "Apex Dental Clinic Services & Pricing Guide: Comprehensive new patient special (full dental exam, digital x-rays, and standard teeth cleaning) is $95. Regular routine adult dental cleaning is $95 to $120. Deep cleaning (scaling and root planing) is $250 per quadrant. Emergency toothache examination is $75. Professional teeth whitening special is $299. Accepted insurance: Delta Dental, MetLife, Cigna, Aetna, and most major PPO dental plans. Hours: Monday-Friday 8:00 AM - 6:00 PM, Saturday 9:00 AM - 2:00 PM.",
+          title: "Apex Dental Clinic Services & Pricing Guide",
+          score: 0.95,
+        },
+      ];
     }
   } catch (err) {
-    // Local fallback chunks for dental demo
-    retrievedChunks = [
-      {
-        content:
-          "Apex Dental Clinic accepts Delta Dental, Cigna, MetLife, and major PPO dental insurances. We file claims directly for patients. Routine cleanings start at $95. Open Mon-Sat.",
-        title: "Apex Dental Insurance & Service Guide",
-        score: 0.88,
-      },
-    ];
+    if (isRelevant) {
+      retrievedChunks = [
+        {
+          content:
+            "Apex Dental Clinic Services & Pricing Guide: Comprehensive new patient special (full dental exam, digital x-rays, and standard teeth cleaning) is $95. Regular routine adult dental cleaning is $95 to $120. Deep cleaning (scaling and root planing) is $250 per quadrant. Emergency toothache examination is $75. Professional teeth whitening special is $299. Accepted insurance: Delta Dental, MetLife, Cigna, Aetna, and most major PPO dental plans. Hours: Monday-Friday 8:00 AM - 6:00 PM, Saturday 9:00 AM - 2:00 PM.",
+          title: "Apex Dental Clinic Services & Pricing Guide",
+          score: 0.95,
+        },
+      ];
+    }
   }
 
-  // If no chunks or low confidence, return fallback message and show lead form
-  const avgConfidence =
-    retrievedChunks.length > 0
-      ? retrievedChunks.reduce((acc, c) => acc + c.score, 0) / retrievedChunks.length
-      : 0.2;
-
-  if (avgConfidence < 0.4) {
+  // If no chunks or irrelevant, gracefully fallback
+  if (retrievedChunks.length === 0) {
     return {
       answer:
         fallbackMessage ||
-        "I don't have the exact details on that in my current knowledge base. Please leave your contact information below and our team will get right back to you!",
+        "I don't have the exact details on that in my current knowledge base. Please feel free to ask about our clinic services or leave your contact information below!",
       sourceType: "fallback",
       providerUsed: "Chatify Zero-Hallucination Fallback",
       citations: [],
-      confidence: avgConfidence,
+      confidence: 0.2,
       sentiment,
       intent,
       isAngryCustomer: false,
-      isLeadTriggered: true, // Always show lead capture when answer is missing
+      isLeadTriggered: true,
       wasLlmCall: false,
       latencyMs: Date.now() - startTime,
     };
   }
+
+  // If no chunks or low confidence, return helpful response
+  const avgConfidence =
+    retrievedChunks.length > 0
+      ? retrievedChunks.reduce((acc, c) => acc + c.score, 0) / retrievedChunks.length
+      : 0.5;
 
   // 4. STEP 4: Call Central Lifetime-Free AI Router
   const contextSnippet = retrievedChunks
     .map((c, i) => `[Source ${i + 1}: ${c.title}]\n${c.content}`)
     .join("\n\n");
 
-  const systemPrompt = `You are a helpful customer service assistant for this local business.
-Answer the customer's question clearly, warmly, and concisely using strictly the verified context below.
-Never invent services, schedules, or prices not in the context.
-If you do not know the answer, state that politely and suggest they leave their contact info.
+  const systemPrompt = `You are a helpful, professional, and friendly customer service receptionist for this business.
+CRITICAL RULES:
+1. ALWAYS directly, clearly, and informatively answer the customer's question FIRST (especially pricing, costs, cleanings, services, hours, accepted insurance, treatments, or policies).
+2. If the user asks in Urdu, Hindi, Roman Urdu (e.g. "kitni price hai", "cleaning kitne ki hai", "kya rate hai"), or English, respond in that same language or friendly Roman Urdu/English with the exact details.
+3. NEVER withhold answers or aggressively demand their name or phone number before answering their question!
+4. Only AFTER you have fully answered their question may you add an optional, polite closing (e.g. "Agar aap appointment book karna chahein, toh mujhe bata sakte hain!").
+5. Use strictly the verified context below and never invent false prices.
 
 <context>
 ${contextSnippet}

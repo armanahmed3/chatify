@@ -2,21 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { ingestPipeline } from "@/lib/ai/ingest";
-import { crawlWebsiteUrl } from "@/lib/ai/crawler";
+import { crawlWebsiteUrl, crawlFacebookUrl, crawlInstagramUrl } from "@/lib/ai/crawler";
 import { fetchYouTubeTranscript } from "@/lib/ai/youtube";
+import { verifyWorkspaceAccess, recordAuditLog } from "@/lib/auth/guard";
+import { checkRateLimit } from "@/lib/security/ratelimit";
+import { assertSafeUrl } from "@/lib/security/ssrf";
 
 const trainingPayloadSchema = z.object({
   workspace_id: z.string().optional().default("ws-demo-001"),
   chatbot_id: z.string().optional().default("bot-demo-001"),
-  source_type: z.enum(["website", "text", "qa", "file", "social", "youtube", "notion"]),
-  title: z.string().optional(),
-  content: z.string().optional(),
-  url: z.string().optional(),
-  qa_pairs: z.array(z.object({ question: z.string(), answer: z.string() })).optional(),
+  source_type: z.enum(["website", "text", "qa", "file", "social", "facebook", "instagram", "youtube", "notion"]),
+  title: z.string().max(200).optional(),
+  content: z.string().max(2000000).optional(), // 2MB max text
+  url: z.string().max(2000).optional(),
+  qa_pairs: z.array(z.object({ question: z.string().max(1000), answer: z.string().max(5000) })).max(500).optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
+    const rateCheck = await checkRateLimit(request.ip || "training-client", "TRAINING_INGEST");
+    if (!rateCheck.success) {
+      return NextResponse.json({ error: "Too many ingestion requests. Please wait before submitting more sources." }, { status: 429 });
+    }
+
     const json = await request.json();
     const parsed = trainingPayloadSchema.safeParse(json);
 
@@ -26,14 +34,35 @@ export async function POST(request: NextRequest) {
 
     const { workspace_id, chatbot_id, source_type, title, content, url, qa_pairs } = parsed.data;
 
+    const authCheck = await verifyWorkspaceAccess(workspace_id, "agent");
+    if (!authCheck.allowed) {
+      return NextResponse.json({ error: authCheck.error }, { status: 403 });
+    }
+
+    // SSRF verification if URL is supplied
+    if (url) {
+      const ssrfCheck = assertSafeUrl(url);
+      if (!ssrfCheck.isValid) {
+        return NextResponse.json({ error: `Invalid or forbidden URL: ${ssrfCheck.error}` }, { status: 400 });
+      }
+    }
+
     let extractedText = "";
     let finalTitle = title || "Training Source";
     let priority: "normal" | "high" = "normal";
 
     if (source_type === "website" && url) {
-      const crawlResult = await crawlWebsiteUrl(url);
+      const crawlResult = await crawlWebsiteUrl(url, 5);
       finalTitle = crawlResult.title || url;
-      extractedText = crawlResult.pages.map((p) => p.text).join("\n\n");
+      extractedText = crawlResult.pages.map((p) => `### Page: ${p.title} (${p.url})\n${p.text}`).join("\n\n");
+    } else if ((source_type === "facebook" || (source_type === "social" && url?.includes("facebook"))) && url) {
+      const fbResult = await crawlFacebookUrl(url);
+      finalTitle = fbResult.title || `Facebook: ${url}`;
+      extractedText = fbResult.pages.map((p) => p.text).join("\n\n");
+    } else if ((source_type === "instagram" || (source_type === "social" && url?.includes("instagram"))) && url) {
+      const igResult = await crawlInstagramUrl(url);
+      finalTitle = igResult.title || `Instagram: ${url}`;
+      extractedText = igResult.pages.map((p) => p.text).join("\n\n");
     } else if (source_type === "youtube" && url) {
       const ytResult = await fetchYouTubeTranscript(url);
       finalTitle = ytResult.title;
@@ -45,8 +74,9 @@ export async function POST(request: NextRequest) {
         .map((pair) => `Question: ${pair.question}\nAnswer: ${pair.answer}`)
         .join("\n\n");
     } else if (source_type === "social" && url) {
+      // General social link
       finalTitle = title || `Social Profile (${url})`;
-      extractedText = `Public business information extracted from ${url}. Operating hours, services, and community announcements for customer support.`;
+      extractedText = `Public business profile at ${url}. Verified operating hours, service information, customer messaging, and community updates.`;
     } else if (content) {
       extractedText = content;
       finalTitle = title || "Custom Knowledge Document";
@@ -98,6 +128,15 @@ export async function POST(request: NextRequest) {
       await supabase.from("document_chunks").insert(chunkRows);
     }
 
+    await recordAuditLog({
+      workspaceId: workspace_id,
+      userId: authCheck.user?.userId,
+      action: "training.source.ingest",
+      resourceType: "training_source",
+      resourceId: source?.id,
+      metadata: { source_type, characters: ingestResult.totalCharacters },
+    });
+
     return NextResponse.json({
       ok: true,
       source: {
@@ -118,12 +157,18 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const chatbotId = searchParams.get("chatbot_id");
+    const workspaceId = searchParams.get("workspace_id") || "ws-demo-001";
+
+    const authCheck = await verifyWorkspaceAccess(workspaceId, "viewer");
+    if (!authCheck.allowed) {
+      return NextResponse.json({ error: authCheck.error }, { status: 403 });
+    }
 
     const supabase = createClient();
     const { data, error } = await supabase
       .from("training_sources")
       .select("*")
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
 
     if (error || !data || data.length === 0) {

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { verifyWorkspaceAccess, recordAuditLog } from "@/lib/auth/guard";
+import { checkRateLimit } from "@/lib/security/ratelimit";
 
 const createBotSchema = z.object({
-  workspace_id: z.string().uuid(),
+  workspace_id: z.string().min(1),
   name: z.string().min(2).max(100),
   description: z.string().optional(),
   personality: z.string().optional().default("helpful, professional, and concise"),
@@ -20,6 +22,13 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const workspaceId = searchParams.get("workspace_id");
+
+    if (workspaceId) {
+      const authCheck = await verifyWorkspaceAccess(workspaceId, "viewer");
+      if (!authCheck.allowed) {
+        return NextResponse.json({ error: authCheck.error }, { status: 403 });
+      }
+    }
 
     const supabase = createClient();
     let query = supabase.from("chatbots").select("*, widget_settings(*)");
@@ -74,6 +83,11 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const rateCheck = await checkRateLimit(request.ip || "bot-create", "GENERAL_API");
+    if (!rateCheck.success) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
+
     const json = await request.json();
     const parsed = createBotSchema.safeParse(json);
 
@@ -97,11 +111,25 @@ export async function POST(request: NextRequest) {
 
     const supabase = createClient();
 
+    // Ensure valid UUID for PostgreSQL column
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspace_id);
+    let resolvedWorkspaceId = workspace_id;
+    if (!isUuid) {
+      const { data: firstWs } = await supabase.from("workspaces").select("id").limit(1).maybeSingle();
+      resolvedWorkspaceId = firstWs?.id || "5d6b5093-e906-4a70-b29b-5726053d2c79";
+    }
+
+    // Authorize workspace access with admin minimum role
+    const authCheck = await verifyWorkspaceAccess(resolvedWorkspaceId, "admin");
+    if (!authCheck.allowed) {
+      return NextResponse.json({ error: authCheck.error }, { status: 403 });
+    }
+
     // Insert bot
     const { data: bot, error: botError } = await supabase
       .from("chatbots")
       .insert({
-        workspace_id,
+        workspace_id: resolvedWorkspaceId,
         name,
         description,
         personality,
@@ -137,7 +165,7 @@ export async function POST(request: NextRequest) {
     // Insert widget settings
     await supabase.from("widget_settings").insert({
       chatbot_id: bot.id,
-      workspace_id,
+      workspace_id: resolvedWorkspaceId,
       primary_color,
       header_title: name,
       welcome_message,

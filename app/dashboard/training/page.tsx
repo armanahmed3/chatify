@@ -298,16 +298,60 @@ export default function TrainingSourcesPage() {
             )}
 
             {selectedSourceType === "qa" && (
-              <div className="space-y-3">
-                <Badge variant="outline" className="text-[10px] bg-accent/10 text-accent border-accent/30">
-                  Priority = High • Instant Answer ($0 cost)
-                </Badge>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px] bg-accent/10 text-accent border-accent/30">
+                    Priority = High • Instant Answer ($0 cost)
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground">
+                    1-Click Presets:
+                  </span>
+                </div>
+
+                {/* 1-Click Fast Presets */}
+                <div className="flex flex-wrap gap-1.5 pb-1">
+                  {[
+                    {
+                      label: "🦷 Teeth Cleaning Price",
+                      q: "Kitni price hai teeth cleaning ki?",
+                      a: "Apex Dental Clinic mein routine teeth cleaning ki price $95 se $120 hai. New patient special sirf $95 hai jisme exam, digital x-rays aur full cleaning shaamil hai!"
+                    },
+                    {
+                      label: "⏰ Clinic Hours",
+                      q: "What are your business hours?",
+                      a: "We are open Monday to Friday from 8:00 AM to 6:00 PM, and Saturday from 9:00 AM to 2:00 PM. Sunday is closed."
+                    },
+                    {
+                      label: "🏥 Insurance Plans",
+                      q: "Do you accept Delta Dental or MetLife?",
+                      a: "Yes! We accept Delta Dental, MetLife, Cigna, Aetna, Guardian, and most major PPO dental plans. We handle direct billing with your provider."
+                    },
+                    {
+                      label: "🚨 Emergency Visit",
+                      q: "Do you offer emergency dental care?",
+                      a: "Yes, we prioritize same-day emergency appointments for severe toothaches, chipped teeth, and trauma. Call us or book online for immediate care."
+                    }
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => {
+                        setQaQuestion(preset.q);
+                        setQaAnswer(preset.a);
+                      }}
+                      className="text-[11px] font-medium px-2.5 py-1 rounded-md bg-secondary/80 hover:bg-secondary text-foreground border border-border/60 transition-colors"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="space-y-1.5">
                   <label className="font-semibold text-foreground">Customer Question</label>
                   <Input
                     value={qaQuestion}
                     onChange={(e) => setQaQuestion(e.target.value)}
-                    placeholder="e.g. Do you accept Delta Dental insurance?"
+                    placeholder="e.g. Do you accept Delta Dental insurance? or Kitni price hai?"
                     required
                     className="h-9 text-xs"
                   />
@@ -318,7 +362,7 @@ export default function TrainingSourcesPage() {
                     rows={3}
                     value={qaAnswer}
                     onChange={(e) => setQaAnswer(e.target.value)}
-                    placeholder="e.g. Yes! We accept Delta Dental, Cigna, and MetLife PPO plans."
+                    placeholder="e.g. Our new patient special is $95 and includes complete cleaning and x-rays."
                     required
                     className="text-xs"
                   />

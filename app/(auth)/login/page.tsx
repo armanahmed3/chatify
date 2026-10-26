@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
-import { ArrowRight, Loader2, Mail, Lock } from "lucide-react";
+import { ArrowRight, Loader2, Mail, Lock, ShieldCheck } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,31 +22,35 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const supabase = createClient();
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password }),
       });
 
-      if (signInError) {
-        // If demo credentials or development mode
-        if (process.env.NODE_ENV === "development" && (!process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL.includes("placeholder"))) {
-          router.push("/dashboard");
-          return;
-        }
-        setError(signInError.message);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Invalid email or password.");
+        setLoading(false);
         return;
       }
 
-      router.push("/dashboard");
-      router.refresh();
-    } catch (err: any) {
-      if (process.env.NODE_ENV === "development") {
-        router.push("/dashboard");
-        return;
+      // Store authenticated user and workspace state in client storage for real-time hydration
+      if (data.workspace) {
+        localStorage.setItem("chatify_active_workspace", JSON.stringify(data.workspace));
       }
+      if (data.workspaces) {
+        localStorage.setItem("chatify_user_workspaces", JSON.stringify(data.workspaces));
+      }
+      if (data.user) {
+        localStorage.setItem("chatify_current_user", JSON.stringify(data.user));
+      }
+
+      // Navigate to dashboard
+      window.location.href = "/dashboard";
+    } catch (err: any) {
       setError(err?.message || "An unexpected error occurred. Please try again.");
-    } finally {
       setLoading(false);
     }
   };
@@ -54,23 +58,29 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     try {
       const supabase = createClient();
-      await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}/api/auth/callback`,
         },
       });
-    } catch (err: any) {
-      setError(err?.message || "Google sign-in unavailable in demo mode.");
+      if (error) {
+        window.location.href = "/signup?provider=google";
+      }
+    } catch {
+      window.location.href = "/signup?provider=google";
     }
   };
 
   return (
     <Card className="border-border/70 shadow-2xl">
       <CardHeader className="space-y-1.5 text-center">
-        <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+        <div className="mx-auto mb-1 flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent">
+          <ShieldCheck className="h-5 w-5" />
+        </div>
+        <CardTitle className="text-2xl font-bold tracking-tight">Sign In to Chatify</CardTitle>
         <CardDescription className="text-xs text-muted-foreground">
-          Enter your email to sign in to your Chatify dashboard
+          Enter your authorized credentials to access your dashboard
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -89,9 +99,10 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="owner@yourbusiness.com"
+              placeholder="name@company.com"
               required
-              className="h-10 text-xs"
+              autoFocus
+              className="h-11 sm:h-10 text-base sm:text-xs"
             />
           </div>
 
@@ -100,7 +111,7 @@ export default function LoginPage() {
               <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
                 <Lock className="h-3.5 w-3.5 text-muted-foreground" /> Password
               </label>
-              <Link href="#" className="text-[11px] text-muted-foreground hover:text-foreground">
+              <Link href="#" className="text-[11px] text-muted-foreground hover:text-foreground min-h-[44px] flex items-center">
                 Forgot password?
               </Link>
             </div>
@@ -110,14 +121,14 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              className="h-10 text-xs"
+              className="h-11 sm:h-10 text-base sm:text-xs"
             />
           </div>
 
-          <Button type="submit" className="w-full h-10 text-xs font-semibold gap-1.5" disabled={loading}>
+          <Button type="submit" className="w-full h-11 sm:h-10 min-h-[44px] text-sm sm:text-xs font-semibold gap-1.5" disabled={loading}>
             {loading ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Signing in...
+                <Loader2 className="h-4 w-4 animate-spin" /> Authenticating...
               </>
             ) : (
               <>
@@ -141,7 +152,7 @@ export default function LoginPage() {
           type="button"
           variant="outline"
           onClick={handleGoogleLogin}
-          className="w-full h-10 text-xs font-medium"
+          className="w-full h-11 sm:h-10 min-h-[44px] text-sm sm:text-xs font-medium"
         >
           <svg className="me-2 h-4 w-4" viewBox="0 0 24 24">
             <path
@@ -161,23 +172,8 @@ export default function LoginPage() {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
             />
           </svg>
-          Google Account
+          Google Workspace Account
         </Button>
-
-        <div className="mt-3">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              setEmail("demo@chatify.ai");
-              setPassword("password123");
-              router.push("/dashboard");
-            }}
-            className="w-full h-9 text-xs font-semibold bg-accent/15 text-accent hover:bg-accent/25 border border-accent/30"
-          >
-            ⚡ Quick 1-Click Demo Login (Instant Dashboard)
-          </Button>
-        </div>
       </CardContent>
       <CardFooter className="justify-center border-t border-border/40 py-4 text-xs text-muted-foreground">
         Don&apos;t have an account?{" "}

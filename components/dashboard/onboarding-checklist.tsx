@@ -11,10 +11,10 @@ export function OnboardingChecklist() {
   const steps = [
     {
       id: 1,
-      title: "Create your chatbot persona",
-      description: "Define bot name, friendly tone, and business hours.",
-      link: "/dashboard/chatbots",
-      action: "Edit Bot",
+      title: "Create your bot via guided AI wizard",
+      description: "Pick an industry template, add verified pricing, and customize tone.",
+      link: "/dashboard/wizard",
+      action: "Launch Wizard",
     },
     {
       id: 2,

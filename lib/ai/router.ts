@@ -48,7 +48,7 @@ async function callGemini(messages: ChatMessage[], options: RouterOptions): Prom
   const timeout = setTimeout(() => controller.abort(), 6000);
 
   try {
-    const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+    const modelName = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
       {

@@ -20,6 +20,7 @@ out/
 .DS_Store
 
 # Agents
+.agents/
 .agent-reach/
 .claude/settings.local.json
 uv.lock

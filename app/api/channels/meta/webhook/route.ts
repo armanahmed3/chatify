@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { executeRagQuery } from "@/lib/ai/rag.ts";
+import { executeRagQuery } from "@/lib/ai/rag";
+import { verifyMetaWebhookSignature } from "@/lib/security/webhooks";
+import { checkRateLimit } from "@/lib/security/ratelimit";
+import { logger } from "@/lib/logger";
 
 /**
  * Meta Webhook Verification Handshake (GET)
@@ -24,10 +27,29 @@ export async function GET(request: NextRequest) {
 /**
  * Inbound Meta Message Ingest (POST)
  * Supports WhatsApp Cloud API, Instagram DM, and Facebook Messenger
+ * Cryptographically verifies x-hub-signature-256 HMAC-SHA256
  */
 export async function POST(request: NextRequest) {
   try {
-    const payload = await request.json();
+    const rateCheck = await checkRateLimit(request.ip || "meta-webhook", "WEBHOOKS");
+    if (!rateCheck.success) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
+
+    const rawBody = await request.text();
+    const signature = request.headers.get("x-hub-signature-256");
+    const appSecret = process.env.META_APP_SECRET;
+
+    // Cryptographic signature check (mandatory if META_APP_SECRET is configured)
+    if (appSecret) {
+      const isValid = verifyMetaWebhookSignature(rawBody, signature, appSecret);
+      if (!isValid) {
+        logger.warn("Meta webhook signature mismatch rejected", { signature });
+        return NextResponse.json({ error: "Invalid cryptographic signature" }, { status: 401 });
+      }
+    }
+
+    const payload = JSON.parse(rawBody);
 
     // Check if this is a WhatsApp message entry
     if (payload.object === "whatsapp_business_account") {

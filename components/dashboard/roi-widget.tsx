@@ -7,13 +7,14 @@ import { Clock, DollarSign, MessageCircle, UserCheck } from "lucide-react";
 export function RoiWidget() {
   const { activeWorkspace } = useWorkspace();
 
-  // Simulated metrics for active workspace
-  const totalChats = 1034;
-  const totalLeads = 38;
-  const hoursSaved = Math.round((totalChats * 3) / 60); // 3 min per chat saved
+  // Metrics scoped to active workspace (demo shows baseline sample data, custom workspace starts fresh)
+  const isDemo = activeWorkspace.id === "ws-demo-001";
+  const totalChats = isDemo ? 1034 : 0;
+  const totalLeads = isDemo ? 38 : 0;
+  const hoursSaved = isDemo ? Math.round((totalChats * 3) / 60) : 0; // 3 min per chat saved
   const estimatedPipelineValue = totalLeads * (activeWorkspace.avg_job_value || 300);
   const planCost = 29; // Starter Plan
-  const netRoiMultiple = Math.round(estimatedPipelineValue / planCost);
+  const netRoiMultiple = estimatedPipelineValue > 0 ? Math.round(estimatedPipelineValue / planCost) : 0;
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -29,7 +30,7 @@ export function RoiWidget() {
           {totalChats.toLocaleString()}
         </div>
         <div className="mt-1 flex items-center gap-1.5 text-[11px] text-emerald-400 font-medium">
-          <span>892 answered via Instant FAQ ($0 cost)</span>
+          <span>{isDemo ? "892 answered via Instant FAQ ($0 cost)" : "Fresh workspace • Ready to answer 24/7"}</span>
         </div>
       </div>
 

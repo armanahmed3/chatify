@@ -70,7 +70,14 @@ export async function lookupSemanticCache(
         if (data.result) {
           try {
             const parsed = typeof data.result === "string" ? JSON.parse(data.result) : data.result;
-            return parsed;
+            if (
+              parsed?.answer &&
+              !parsed.answer.includes("available nahi hai") &&
+              !parsed.answer.includes("don't have the exact") &&
+              !parsed.answer.includes("Maaf kijiye")
+            ) {
+              return parsed;
+            }
           } catch {
             // format parse error fallback
           }
@@ -84,7 +91,13 @@ export async function lookupSemanticCache(
   // 2. Check local exact string matches
   for (const entry of localSemanticCache) {
     if (entry.query.toLowerCase().trim() === normalizedQuery) {
-      return entry;
+      if (
+        !entry.answer.includes("available nahi hai") &&
+        !entry.answer.includes("don't have the exact") &&
+        !entry.answer.includes("Maaf kijiye")
+      ) {
+        return entry;
+      }
     }
   }
 
@@ -93,7 +106,12 @@ export async function lookupSemanticCache(
     for (const entry of localSemanticCache) {
       if (entry.embedding && entry.embedding.length > 0) {
         const sim = cosineSimilarity(queryEmbedding, entry.embedding);
-        if (sim >= similarityThreshold) {
+        if (
+          sim >= similarityThreshold &&
+          !entry.answer.includes("available nahi hai") &&
+          !entry.answer.includes("don't have the exact") &&
+          !entry.answer.includes("Maaf kijiye")
+        ) {
           return entry;
         }
       }
@@ -109,6 +127,14 @@ export async function saveSemanticCache(
   embedding: number[],
   citations: Array<{ title: string; url?: string; snippet?: string }>
 ) {
+  // Never cache negative fallback replies
+  if (
+    answer.includes("available nahi hai") ||
+    answer.includes("don't have the exact details") ||
+    answer.includes("Maaf kijiye")
+  ) {
+    return;
+  }
   const entry: CacheEntry = {
     query,
     answer,

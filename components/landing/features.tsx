@@ -83,7 +83,7 @@ export function LandingFeatures() {
                   <h3 className="font-bold text-base text-foreground mb-2">
                     {feat.title}
                   </h3>
-                  <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                  <p className="text-base sm:text-sm text-muted-foreground leading-relaxed">
                     {feat.desc}
                   </p>
                 </div>

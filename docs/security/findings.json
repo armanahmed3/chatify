@@ -1,0 +1,80 @@
+[
+  {
+    "verdict": "confirmed",
+    "fingerprint": "SEC-SSRF-001-RESOLVED",
+    "title": "Strict SSRF Ingestion Boundary Enforcement",
+    "description": "Server-side web crawler validates and denies all private network blocks, loopback interfaces, cloud metadata endpoints (169.254.169.254), and non-standard schemes before dispatching HTTP fetch requests.",
+    "root_cause": "Unvalidated crawler input could permit attackers to probe internal cloud environments or localhost services.",
+    "intended_behavior": "The SSRF validator strictly resolves targets via safe DNS checks and drops non-routable, private, or metadata IPs.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "app/api/training/crawl/route.ts",
+        "line": 42,
+        "scope": "crawlRequest"
+      },
+      {
+        "kind": "propagation",
+        "file": "lib/security/ssrf.ts",
+        "line": 15,
+        "scope": "validateSafeUrl"
+      },
+      {
+        "kind": "sink",
+        "file": "lib/ai/ingest.ts",
+        "line": 50,
+        "scope": "fetchCleanHtml"
+      }
+    ],
+    "status": "remediated",
+    "test_file": "tests/unit/security.test.mjs"
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "SEC-WEBHOOK-002-RESOLVED",
+    "title": "Timing-Safe Webhook HMAC-SHA256 Signature Verification",
+    "description": "Inbound webhooks for WhatsApp Cloud API and Stripe must be cryptographically verified using constant-time comparison to prevent message forgery and timing analysis.",
+    "root_cause": "Direct string comparison (===) of cryptographic signatures leaks timing information enabling byte-by-byte forgery.",
+    "intended_behavior": "Signatures are computed with HMAC-SHA256 and compared using crypto.timingSafeEqual on equal-length buffers.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "app/api/webhooks/whatsapp/route.ts",
+        "line": 28,
+        "scope": "handleWebhook"
+      },
+      {
+        "kind": "sink",
+        "file": "lib/security/webhook-verify.ts",
+        "line": 20,
+        "scope": "verifyHmacSignature"
+      }
+    ],
+    "status": "remediated",
+    "test_file": "tests/unit/security.test.mjs"
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "SEC-TRIAL-003-RESOLVED",
+    "title": "Anti-Sybil Free Trial Abuse & Bulk Account Mitigation",
+    "description": "Automated engine blocks disposable domain registrations, enforces real-time SMS/OTP identity proofs, and limits free trial grants to 1 per verified phone number and device.",
+    "root_cause": "Unrestricted trial signups allow bot farms to exhaust AI quota without payment.",
+    "intended_behavior": "Signup engine cross-checks phone numbers and email domains against disposable lists and active trial ledgers.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "app/api/auth/signup/route.ts",
+        "line": 35,
+        "scope": "registerBusiness"
+      },
+      {
+        "kind": "sink",
+        "file": "lib/security/trial-abuse.ts",
+        "line": 18,
+        "scope": "verifyTrialEligibility"
+      }
+    ],
+    "status": "remediated",
+    "test_file": "tests/unit/security.test.mjs"
+  }
+]

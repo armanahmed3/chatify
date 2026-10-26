@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardContent, CardFooter } from "@/components/ui/card";
 import { Check, ShieldCheck, HelpCircle, ArrowRight } from "lucide-react";
-import { PLANS, BILLING_PROMISES, RECEPTIONIST_COMPARISON } from "@/lib/plans";
+import { PUBLIC_PLANS, BILLING_PROMISES, RECEPTIONIST_COMPARISON } from "@/lib/plans";
 import { formatCurrency } from "@/lib/utils";
 
 export function LandingPricing() {
@@ -15,29 +15,29 @@ export function LandingPricing() {
         <div className="mx-auto max-w-3xl text-center">
           <Badge variant="outline" className="mb-4 gap-1.5 border-accent/40 bg-accent/10 px-3 py-1 text-xs text-foreground">
             <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-            <span>Anti-Meter Guarantee</span>
+            <span>7-Day Free Trial • No Credit Card Required</span>
           </Badge>
 
           <h2 className="text-3xl font-extrabold tracking-tight sm:text-4xl text-foreground">
-            Predictable Flat Pricing. Zero Surprise Invoices.
+            Try Free For 7 Days. Zero Risk, Flat Pricing.
           </h2>
           <p className="mt-4 text-sm sm:text-base text-muted-foreground">
-            Other platforms charge for every single message or hit you with surprise token fees. Chatify gives you unlimited FAQ answers and flat monthly limits.
+            Deploy your custom AI chatbot in 3 minutes. Test lead capture, human takeover, and instant answers completely free for 7 days.
           </p>
 
           {/* Promise Badge */}
           <div className="mt-6 inline-flex flex-wrap items-center justify-center gap-2 rounded-full border border-border/80 bg-background px-4 py-1.5 text-xs font-semibold text-foreground shadow-sm">
-            <span>🛡️ No per-message fees</span>
+            <span>🛡️ 7-Day Free Trial</span>
             <span className="text-muted-foreground">•</span>
-            <span>No add-ons</span>
+            <span>No Credit Card Needed</span>
             <span className="text-muted-foreground">•</span>
-            <span>No surprise bills</span>
+            <span>Cancel Anytime</span>
           </div>
         </div>
 
-        {/* 4 Flat Pricing Cards */}
-        <div className="mt-16 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
-          {Object.values(PLANS).map((plan) => {
+        {/* 3 Flat Pricing Cards */}
+        <div className="mt-16 mx-auto max-w-5xl grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 items-stretch">
+          {PUBLIC_PLANS.map((plan) => {
             const isPopular = plan.popular;
             return (
               <Card
@@ -97,7 +97,7 @@ export function LandingPricing() {
                   <Link href={`/signup?plan=${plan.id}`} className="w-full">
                     <Button
                       variant={isPopular ? "default" : "outline"}
-                      className="w-full text-xs font-semibold h-10 shadow-sm gap-1.5"
+                      className="w-full text-xs font-semibold h-11 sm:h-10 min-h-[44px] shadow-sm gap-1.5"
                     >
                       <span>{plan.ctaText}</span>
                       <ArrowRight className="h-3.5 w-3.5" />

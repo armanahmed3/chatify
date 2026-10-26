@@ -4,11 +4,11 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
 
 const leadSchema = z.object({
-  name: z.string().min(1).max(100),
-  email: z.string().email(),
-  phone: z.string().min(5).max(30),
-  requirements: z.string().optional().default("General inquiry"),
-  conversation_id: z.string().optional(),
+  name: z.string().optional().nullable(),
+  email: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  requirements: z.string().optional().nullable(),
+  conversation_id: z.string().optional().nullable(),
 });
 
 export async function POST(
@@ -23,7 +23,16 @@ export async function POST(
       return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
     }
 
-    const { name, email, phone, requirements, conversation_id } = parsed.data;
+    const raw = parsed.data;
+
+    // Strict normalization: any missing or empty field becomes "Not Given"
+    const name = raw.name?.trim() ? raw.name.trim() : "Not Given";
+    const rawEmail = raw.email?.trim() || "";
+    const email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(rawEmail) ? rawEmail : "Not Given";
+    const rawPhone = raw.phone?.trim() || "";
+    const phone = rawPhone.replace(/[^\d+]/g, "").length >= 7 ? rawPhone : "Not Given";
+    const requirements = raw.requirements?.trim() ? raw.requirements.trim() : "Direct inquiry";
+    const conversation_id = raw.conversation_id || null;
 
     // Automatic lead qualification scoring
     let score: "hot" | "warm" | "cold" = "warm";
@@ -62,6 +71,7 @@ export async function POST(
     const resendApiKey = process.env.RESEND_API_KEY;
     if (resendApiKey && score === "hot") {
       try {
+        const resend = new Resend(resendApiKey);
         const sender = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
         const recipient = process.env.OWNER_ALERT_EMAIL || "flexfitfury9@gmail.com";
         await resend.emails.send({

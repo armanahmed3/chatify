@@ -139,9 +139,9 @@ export default function BillingPage() {
 
       {/* Flat Plan Comparison Grid */}
       <div className="space-y-4">
-        <h3 className="text-base font-bold text-foreground">Available Plans</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
-          {Object.values(PLANS).map((plan) => {
+        <h3 className="text-base font-bold text-foreground">Available Plans & 7-Day Free Trial</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
+          {Object.values(PLANS).filter((p) => !p.hidden).map((plan) => {
             const isCurrent = plan.id === currentPlan;
             return (
               <Card

@@ -66,7 +66,7 @@ export function LandingFAQ() {
                   />
                 </button>
                 {isOpen && (
-                  <div className="px-5 pb-5 text-xs sm:text-sm text-muted-foreground leading-relaxed border-t border-border/40 pt-3">
+                  <div className="px-5 pb-5 text-base sm:text-sm text-muted-foreground leading-relaxed border-t border-border/40 pt-3">
                     {faq.a}
                   </div>
                 )}

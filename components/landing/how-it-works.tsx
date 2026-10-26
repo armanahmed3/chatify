@@ -59,7 +59,7 @@ export function LandingHowItWorks() {
                 <h3 className="text-lg font-bold text-foreground mb-2">
                   {item.title}
                 </h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">
+                <p className="text-base sm:text-sm text-muted-foreground leading-relaxed">
                   {item.description}
                 </p>
               </div>

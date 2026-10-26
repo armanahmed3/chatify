@@ -12,6 +12,9 @@ export interface PlanTier {
   description: string;
   badge?: string;
   popular?: boolean;
+  hidden?: boolean;
+  trialDays?: number;
+  trialNotice?: string;
   limits: {
     maxBots: number;
     monthlyAiChats: number;
@@ -31,9 +34,10 @@ export const PLANS: Record<string, PlanTier> = {
   free: {
     id: "free",
     name: "Free",
+    hidden: true,
     priceMonthly: 0,
     pricePerDay: 0,
-    description: "Ideal for testing your chatbot and answering basic FAQs 24/7.",
+    description: "Legacy evaluation tier.",
     limits: {
       maxBots: 1,
       monthlyAiChats: 100,
@@ -50,19 +54,20 @@ export const PLANS: Record<string, PlanTier> = {
       "Unlimited FAQ / Instant answers ($0 cost)",
       "100 AI Smart Chats / month",
       "Website Embeddable Widget",
-      "Website & Custom Text Training",
       "Standard Response Time",
     ],
-    ctaText: "Get Started Free",
+    ctaText: "Legacy Free Tier",
   },
   starter: {
     id: "starter",
     name: "Starter",
     priceMonthly: 29,
     pricePerDay: 0.97,
-    description: "Perfect for local businesses wanting 24/7 lead capture and zero missed calls.",
+    description: "Start with a 7-day full-feature trial — no credit card required. 24/7 lead capture and zero missed calls.",
     popular: true,
-    badge: "Most Popular",
+    badge: "7-Day Free Trial",
+    trialDays: 7,
+    trialNotice: "7-Day Free Trial • No Credit Card Required",
     limits: {
       maxBots: 2,
       monthlyAiChats: 2000,
@@ -75,22 +80,24 @@ export const PLANS: Record<string, PlanTier> = {
       subAccounts: false,
     },
     features: [
-      "2 AI Chatbots",
+      "7 Days 100% Free Trial (No Card Needed)",
+      "2 AI Chatbots with Custom Knowledge",
       "Unlimited FAQ / Instant answers ($0 cost)",
       "2,000 AI Smart Chats / month",
-      "Smart Lead Capture (Phone, Email, Notes)",
+      "Automated Lead Capture (Phone, Email, CRM)",
+      "Human Takeover & Live Visitor Radar",
       "Remove Chatify Branding Badge",
-      "Priority Email & Resend Alerts",
-      "Website Sitemap & File Upload Training",
-      "Unified Inbox with Human Takeover",
+      "Real-time SMS & Resend Email Alerts",
     ],
-    ctaText: "Start 14-Day Free Trial",
+    ctaText: "Start 7-Day Free Trial",
   },
   pro: {
     id: "pro",
     name: "Pro",
     priceMonthly: 79,
     pricePerDay: 2.63,
+    trialDays: 7,
+    trialNotice: "7-Day Free Trial • No Credit Card Required",
     description: "For thriving businesses connecting WhatsApp, Instagram, and automated bookings.",
     limits: {
       maxBots: 5,
@@ -114,13 +121,15 @@ export const PLANS: Record<string, PlanTier> = {
       "Dynamic Promotional Coupons & Catalog Cards",
       "Lead Scoring (Hot, Warm, Cold)",
     ],
-    ctaText: "Start 14-Day Free Trial",
+    ctaText: "Start 7-Day Free Trial",
   },
   agency: {
     id: "agency",
     name: "Agency",
     priceMonthly: 199,
     pricePerDay: 6.63,
+    trialDays: 7,
+    trialNotice: "7-Day Free Trial • No Credit Card Required",
     description: "Complete white-label solution for agencies and multi-location practices.",
     limits: {
       maxBots: 25,
@@ -144,14 +153,16 @@ export const PLANS: Record<string, PlanTier> = {
       "Comprehensive CSV & Data Export (GDPR)",
       "VIP Priority Support & Onboarding",
     ],
-    ctaText: "Start 14-Day Free Trial",
+    ctaText: "Start 7-Day Free Trial",
   },
 };
+
+export const PUBLIC_PLANS = [PLANS.starter, PLANS.pro, PLANS.agency];
 
 export const BILLING_PROMISES = [
   "No per-message fees ever",
   "No add-ons or surprise charges",
-  "No upfront credit card required for 14-day trial",
+  "7-Day Free Trial with full features • No credit card required",
   "Cancel in one click anytime",
 ];
 

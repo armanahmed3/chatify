@@ -79,26 +79,26 @@ export function LandingHero() {
             <span className="font-medium text-foreground">Zero-Code AI Engine for Local Businesses</span>
           </Badge>
 
-          <h1 className="max-w-4xl text-4xl font-extrabold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="max-w-4xl text-3xl font-extrabold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl leading-tight">
             Never Miss Another Customer.{" "}
             <span className="bg-gradient-to-r from-foreground via-foreground/80 to-muted-foreground bg-clip-text text-transparent">
               AI Chatbot Trained on Your Business in 5 Minutes.
             </span>
           </h1>
 
-          <p className="mt-6 max-w-2xl text-lg text-muted-foreground sm:text-xl">
+          <p className="mt-6 max-w-2xl text-base sm:text-lg md:text-xl text-muted-foreground">
             Auto repair shops, dental clinics, salons, restaurants, and retail stores use Chatify to answer customer questions 24/7, book appointments, and capture high-value leads across Website, WhatsApp, and Instagram.
           </p>
 
-          <div className="mt-8 flex flex-col sm:flex-row items-center gap-4">
-            <Link href="/signup">
-              <Button size="lg" className="h-12 px-8 text-base shadow-xl gap-2">
+          <div className="mt-8 flex flex-col sm:flex-row items-center gap-4 w-full sm:w-auto justify-center">
+            <Link href="/signup" className="w-full sm:w-auto">
+              <Button size="lg" className="h-12 w-full sm:w-auto px-8 text-base shadow-xl gap-2 justify-center">
                 <span>Build Your Free Chatbot</span>
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
-            <Link href="#pricing">
-              <Button variant="outline" size="lg" className="h-12 px-8 text-base">
+            <Link href="#pricing" className="w-full sm:w-auto">
+              <Button variant="outline" size="lg" className="h-12 w-full sm:w-auto px-8 text-base justify-center">
                 View Flat Pricing (From $29/mo)
               </Button>
             </Link>
@@ -146,14 +146,14 @@ export function LandingHero() {
                 <p className="text-xs text-muted-foreground">
                   Our crawler reads your pages, FAQs, hours, and services automatically.
                 </p>
-                <form onSubmit={handleSimulateCrawl} className="flex gap-2">
+                <form onSubmit={handleSimulateCrawl} className="flex flex-col sm:flex-row gap-2">
                   <Input
                     value={demoUrl}
                     onChange={(e) => setDemoUrl(e.target.value)}
                     placeholder="yourbusiness.com"
-                    className="h-9 text-xs"
+                    className="h-11 sm:h-9 text-base sm:text-xs w-full"
                   />
-                  <Button type="submit" size="sm" disabled={isCrawling} className="shrink-0 gap-1.5">
+                  <Button type="submit" size="sm" disabled={isCrawling} className="shrink-0 gap-1.5 w-full sm:w-auto min-h-[44px] sm:min-h-0">
                     {isCrawling ? (
                       <>
                         <Zap className="h-3.5 w-3.5 animate-spin" /> Crawling...
