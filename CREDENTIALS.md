@@ -1,49 +1,25 @@
-# Production & Enterprise Credentials
+# Credentials Policy
 
-> [!IMPORTANT]
-> **CONFIDENTIAL — SYSTEM ADMINISTRATOR & PRODUCTION TEST ACCESS ONLY**  
-> These credentials are for system administration, operational management, and authorized developer access.  
-> As instructed, these credentials are **NEVER** displayed or exposed on the public SaaS web application or client interfaces.
+**No real credentials are stored in this repository. Never commit any.**
 
----
-
-## 1. System Administrator Account (Full Enterprise Access)
-
-| Attribute | Value |
+| Where | What goes there |
 | :--- | :--- |
-| **Email** | `admin@chatify.ai` |
-| **Password** | `AdminSecure2026!` |
-| **Role** | `admin` (Super Administrator) |
-| **Primary Workspace** | `Chatify Enterprise HQ` (`ws-admin-hq`) |
-| **Slug** | `chatify-enterprise` |
-| **Capabilities** | Full administrative controls, multi-workspace switching, global analytics, security audit controls, and billing management |
+| `.env.local` (gitignored) | Your local development secrets |
+| Hosting provider env settings (Vercel / Fly / Render / Docker `env_file`) | Production secrets |
+| GitHub → Settings → Secrets and variables → Actions | CI-only secrets (if ever needed) |
 
----
+## Accounts
 
-## 2. Default Standard User Account (7-Day Trial / Starter)
+- **Production:** all accounts are real Supabase Auth users created through `/signup`. There are **no default
+  passwords**. To make someone a super admin, run in the Supabase SQL editor:
+  `update public.profiles set is_super_admin = true where email = 'you@yourdomain.com';`
+- **Local development only:** two sandbox accounts (`admin@chatify.ai`, `user@chatify.ai`) exist in memory.
+  Their passwords come from `DEV_ADMIN_PASSWORD` / `DEV_USER_PASSWORD` in `.env.local`. If unset, a random
+  password is generated on every start, so nobody can log in with a guessable default. The sandbox store
+  is hard-disabled when `NODE_ENV=production`.
 
-| Attribute | Value |
-| :--- | :--- |
-| **Email** | `user@chatify.ai` |
-| **Password** | `UserPass2026!` |
-| **Role** | `user` (Practice / Business Owner) |
-| **Primary Workspace** | `Nova Marketing Agency` (`ws-nova-agency`) |
-| **Slug** | `nova-agency` |
-| **Capabilities** | Dedicated business dashboard, chatbot studio, live chat inbox, lead management, and ROI tracking |
+## If a secret leaks
 
----
-
-## 3. Dynamic Registered Accounts (Self-Service Signup)
-
-When any client or practice signs up via `/signup`:
-1. **Dual Verification**: Individual verification codes are required for **both** the user's **Email** and **Phone Number**.
-2. **Dynamic Multi-Dashboard**: A brand-new isolated workspace (`Workspace`) is generated in real-time matching the user's entered practice name and custom URL slug (e.g., `/chat/smith-orthodontics?brand=Smith%20Orthodontics`).
-3. **Workspace Isolation**: The user's dashboard only loads their own custom business metrics, chatbot, and leads. They can also create additional branch workspaces dynamically via the sidebar workspace switcher.
-
----
-
-## 4. Verification & Testing
-
-- **Login Page URL**: `/login` (No test buttons or demo credentials shown on the public UI)
-- **Signup Page URL**: `/signup` (Individual dual verification active)
-- **Dashboard URL**: `/dashboard` (Dynamically hydated with the logged-in user's workspace)
+Rotate it at the provider immediately (Supabase → Settings → API, Groq console, Google AI Studio, Upstash console,
+Resend dashboard), update it in your host's env settings, and redeploy. Removing it from git history is **not**
+enough on its own.

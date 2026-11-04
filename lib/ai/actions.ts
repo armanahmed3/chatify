@@ -67,16 +67,20 @@ export async function executeAiAction(
       }
 
       try {
-        const response = await fetch(webhookUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Chatify-Secret": action.settings.auth_header || "chatify-secure",
-          },
-          body: JSON.stringify(inputData),
-        });
+        const { safeFetch } = await import("../security/ssrf.ts");
+        const { createHmac } = await import("crypto");
+        const body = JSON.stringify(inputData);
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        const signingSecret = action.settings.signing_secret || action.settings.auth_header;
+        if (signingSecret) {
+          const ts = Math.floor(Date.now() / 1000).toString();
+          headers["X-Chatify-Timestamp"] = ts;
+          headers["X-Chatify-Signature"] =
+            "sha256=" + createHmac("sha256", signingSecret).update(`${ts}.${body}`).digest("hex");
+        }
+        const response = await safeFetch(webhookUrl, { method: "POST", headers, body, timeoutMs: 8000 });
 
-        const resData = await response.json();
+        const resData = await response.json().catch(() => ({}));
         return {
           success: response.ok,
           actionType: "webhook",

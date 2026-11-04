@@ -4,6 +4,7 @@
  */
 
 import crypto from "crypto";
+import { Redis } from "@upstash/redis";
 import dns from "dns/promises";
 import { createRequire } from "module";
 
@@ -484,5 +485,60 @@ export function verifyOtp(target: string, code: string): { valid: boolean; error
 
   // Single-use: delete upon successful verification
   otpStore.delete(key);
+  return { valid: true };
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Distributed OTP storage (production)
+ * When Upstash Redis is configured, OTPs live in Redis so verification works across multiple
+ * instances / serverless invocations. Only a SHA-256 hash of the code is stored, with a 5-min TTL
+ * and a 5-attempt cap. Falls back to the in-process store above for local development.
+ * ------------------------------------------------------------------------------------------------- */
+let otpRedis: Redis | null = null;
+function getOtpRedis(): Redis | null {
+  if (otpRedis) return otpRedis;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token || url.includes("placeholder") || url.includes("your-redis")) return null;
+  try {
+    otpRedis = new Redis({ url, token });
+  } catch {
+    otpRedis = null;
+  }
+  return otpRedis;
+}
+
+const hashOtp = (target: string, code: string) =>
+  crypto.createHash("sha256").update(`${target}:${code}`).digest("hex");
+
+export async function issueOtp(target: string): Promise<string> {
+  const redis = getOtpRedis();
+  if (!redis) return generateVerificationOtp(target);
+  const key = target.toLowerCase().trim();
+  const code = crypto.randomInt(100000, 1000000).toString();
+  await redis.set(`chatify:otp:${key}`, { h: hashOtp(key, code), a: 0 }, { ex: 300 });
+  return code;
+}
+
+export async function consumeOtp(target: string, code: string): Promise<{ valid: boolean; error?: string }> {
+  const redis = getOtpRedis();
+  if (!redis) return verifyOtp(target, code);
+  const key = target.toLowerCase().trim();
+  const redisKey = `chatify:otp:${key}`;
+  const entry = await redis.get<{ h: string; a: number }>(redisKey);
+  if (!entry) {
+    return { valid: false, error: "No verification code requested or code has expired. Please request a new code." };
+  }
+  if (entry.a >= 5) {
+    await redis.del(redisKey);
+    return { valid: false, error: "Too many incorrect attempts. Please request a new verification code." };
+  }
+  const expected = Buffer.from(entry.h, "hex");
+  const actual = Buffer.from(hashOtp(key, code.trim()), "hex");
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    await redis.set(redisKey, { h: entry.h, a: entry.a + 1 }, { keepTtl: true });
+    return { valid: false, error: "Incorrect verification code. Please check and try again." };
+  }
+  await redis.del(redisKey);
   return { valid: true };
 }

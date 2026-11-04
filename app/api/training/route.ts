@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError } from "@/lib/http";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { ingestPipeline } from "@/lib/ai/ingest";
@@ -6,11 +7,12 @@ import { crawlWebsiteUrl, crawlFacebookUrl, crawlInstagramUrl } from "@/lib/ai/c
 import { fetchYouTubeTranscript } from "@/lib/ai/youtube";
 import { verifyWorkspaceAccess, recordAuditLog } from "@/lib/auth/guard";
 import { checkRateLimit } from "@/lib/security/ratelimit";
-import { assertSafeUrl } from "@/lib/security/ssrf";
+import { assertSafeUrlResolved } from "@/lib/security/ssrf";
+import { getClientIp } from "@/lib/http";
 
 const trainingPayloadSchema = z.object({
-  workspace_id: z.string().optional().default("ws-demo-001"),
-  chatbot_id: z.string().optional().default("bot-demo-001"),
+  workspace_id: z.string().min(1).max(100).optional(),
+  chatbot_id: z.string().min(1).max(100).optional(),
   source_type: z.enum(["website", "text", "qa", "file", "social", "facebook", "instagram", "youtube", "notion"]),
   title: z.string().max(200).optional(),
   content: z.string().max(2000000).optional(), // 2MB max text
@@ -20,7 +22,7 @@ const trainingPayloadSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const rateCheck = await checkRateLimit(request.ip || "training-client", "TRAINING_INGEST");
+    const rateCheck = await checkRateLimit(`training:${getClientIp(request)}`, "TRAINING_INGEST");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Too many ingestion requests. Please wait before submitting more sources." }, { status: 429 });
     }
@@ -29,19 +31,38 @@ export async function POST(request: NextRequest) {
     const parsed = trainingPayloadSchema.safeParse(json);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid training payload." }, { status: 400 });
     }
 
-    const { workspace_id, chatbot_id, source_type, title, content, url, qa_pairs } = parsed.data;
+    const { source_type, title, content, url, qa_pairs } = parsed.data;
+    // Demo defaults exist only for local development; production requires explicit ids.
+    if (process.env.NODE_ENV === "production" && (!parsed.data.workspace_id || !parsed.data.chatbot_id)) {
+      return NextResponse.json({ error: "workspace_id and chatbot_id are required." }, { status: 400 });
+    }
+    const workspace_id = parsed.data.workspace_id || "ws-demo-001";
+    const chatbot_id = parsed.data.chatbot_id || "bot-demo-001";
 
     const authCheck = await verifyWorkspaceAccess(workspace_id, "agent");
     if (!authCheck.allowed) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 });
     }
 
+    // BOLA: the chatbot must belong to the workspace the caller is authorized for.
+    if (process.env.NODE_ENV === "production" || !workspace_id.startsWith("ws-")) {
+      const { data: ownedBot } = await (await createClient())
+        .from("chatbots")
+        .select("id")
+        .eq("id", chatbot_id)
+        .eq("workspace_id", workspace_id)
+        .maybeSingle();
+      if (!ownedBot) {
+        return NextResponse.json({ error: "Chatbot not found in this workspace." }, { status: 404 });
+      }
+    }
+
     // SSRF verification if URL is supplied
     if (url) {
-      const ssrfCheck = assertSafeUrl(url);
+      const ssrfCheck = await assertSafeUrlResolved(url);
       if (!ssrfCheck.isValid) {
         return NextResponse.json({ error: `Invalid or forbidden URL: ${ssrfCheck.error}` }, { status: 400 });
       }
@@ -97,7 +118,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Save source record and chunks in Supabase
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: source, error: sourceError } = await supabase
       .from("training_sources")
       .insert({
@@ -150,26 +171,34 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "training");
   }
 }
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const workspaceId = searchParams.get("workspace_id") || "ws-demo-001";
+    const workspaceId = searchParams.get("workspace_id");
+    if (!workspaceId) {
+      return NextResponse.json({ error: "workspace_id is required." }, { status: 400 });
+    }
 
     const authCheck = await verifyWorkspaceAccess(workspaceId, "viewer");
     if (!authCheck.allowed) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 });
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from("training_sources")
       .select("*")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
+
+    if (process.env.NODE_ENV === "production") {
+      if (error) return serverError(error, "training.list");
+      return NextResponse.json({ sources: data || [] });
+    }
 
     if (error || !data || data.length === 0) {
       return NextResponse.json({
@@ -207,6 +236,6 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ sources: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "training");
   }
 }

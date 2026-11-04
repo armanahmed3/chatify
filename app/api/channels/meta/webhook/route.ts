@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+import { serverError, getClientIp } from "@/lib/http";
 import { executeRagQuery } from "@/lib/ai/rag";
 import { verifyMetaWebhookSignature } from "@/lib/security/webhooks";
 import { checkRateLimit } from "@/lib/security/ratelimit";
@@ -14,11 +16,17 @@ export async function GET(request: NextRequest) {
   const token = searchParams.get("hub.verify_token");
   const challenge = searchParams.get("hub.challenge");
 
-  const expectedToken =
-    process.env.META_WEBHOOK_VERIFY_TOKEN || "chatify_meta_verify_secret_token";
+  const expectedToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
+  if (!expectedToken) {
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
+  }
 
-  if (mode === "subscribe" && token === expectedToken) {
-    return new NextResponse(challenge, { status: 200 });
+  const a = Buffer.from(token || "");
+  const b = Buffer.from(expectedToken);
+  const tokenOk = a.length === b.length && crypto.timingSafeEqual(a, b);
+
+  if (mode === "subscribe" && tokenOk && challenge && /^[\w-]{1,200}$/.test(challenge)) {
+    return new NextResponse(challenge, { status: 200, headers: { "Content-Type": "text/plain" } });
   }
 
   return NextResponse.json({ error: "Verification token mismatch" }, { status: 403 });
@@ -31,7 +39,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const rateCheck = await checkRateLimit(request.ip || "meta-webhook", "WEBHOOKS");
+    const rateCheck = await checkRateLimit(getClientIp(request), "WEBHOOKS");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -40,16 +48,23 @@ export async function POST(request: NextRequest) {
     const signature = request.headers.get("x-hub-signature-256");
     const appSecret = process.env.META_APP_SECRET;
 
-    // Cryptographic signature check (mandatory if META_APP_SECRET is configured)
-    if (appSecret) {
-      const isValid = verifyMetaWebhookSignature(rawBody, signature, appSecret);
-      if (!isValid) {
-        logger.warn("Meta webhook signature mismatch rejected", { signature });
-        return NextResponse.json({ error: "Invalid cryptographic signature" }, { status: 401 });
+    // Cryptographic signature check — mandatory in production.
+    if (!appSecret) {
+      if (process.env.NODE_ENV === "production") {
+        logger.error("META_APP_SECRET missing in production; rejecting webhook");
+        return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
       }
+    } else if (!verifyMetaWebhookSignature(rawBody, signature, appSecret)) {
+      logger.warn("Meta webhook signature mismatch rejected");
+      return NextResponse.json({ error: "Invalid cryptographic signature" }, { status: 401 });
     }
 
-    const payload = JSON.parse(rawBody);
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    }
 
     // Check if this is a WhatsApp message entry
     if (payload.object === "whatsapp_business_account") {
@@ -59,7 +74,8 @@ export async function POST(request: NextRequest) {
 
       if (message && message.type === "text") {
         const fromNumber = message.from; // Customer phone number
-        const textBody = message.text?.body; // Inbound user question
+        const textBody = String(message.text?.body || "").slice(0, 2000); // Inbound user question
+        if (!textBody) return NextResponse.json({ status: "EVENT_RECEIVED" });
 
         // Execute unified RAG pipeline for this business bot
         const ragResult = await executeRagQuery({
@@ -95,6 +111,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ status: "EVENT_RECEIVED" });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "channels.meta.webhook");
   }
 }

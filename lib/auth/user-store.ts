@@ -29,8 +29,24 @@ export interface UserAccount {
   createdAt: string;
 }
 
+/**
+ * NOTE: This in-memory store is a LOCAL DEVELOPMENT sandbox only. In production every login and
+ * signup goes through Supabase Auth (bcrypt-hashed, server-side). See isLocalUserStoreEnabled().
+ * Passwords here are hashed with scrypt (memory-hard) + per-user random salt.
+ */
 function hashPassword(password: string, salt: string): string {
-  return crypto.pbkdf2Sync(password, salt, 10000, 64, "sha512").toString("hex");
+  return crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
+}
+
+function safeEqualHex(a: string, b: string): boolean {
+  const ab = Buffer.from(a, "hex");
+  const bb = Buffer.from(b, "hex");
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+/** The local sandbox store is never active in production. */
+export function isLocalUserStoreEnabled(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.DISABLE_LOCAL_DEMO_USERS !== "true";
 }
 
 function generateSalt(): string {
@@ -46,15 +62,20 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// 1. Pre-configured Administrator Account
-const adminSalt = "chatify_admin_secure_salt_2026";
+// Dev sandbox credentials come from env (DEV_ADMIN_PASSWORD / DEV_USER_PASSWORD). If unset, a random
+// password is generated per process, so there are no shared, guessable default credentials.
+const devAdminPassword = process.env.DEV_ADMIN_PASSWORD || crypto.randomBytes(18).toString("base64url");
+const devUserPassword = process.env.DEV_USER_PASSWORD || crypto.randomBytes(18).toString("base64url");
+
+// 1. Pre-configured Administrator Account (development sandbox only)
+const adminSalt = generateSalt();
 const ADMIN_USER: UserAccount = {
   id: "usr-admin-001",
   email: "admin@chatify.ai",
   name: "System Administrator",
   phone: "+1 (800) 555-0199",
   salt: adminSalt,
-  passwordHash: hashPassword("AdminSecure2026!", adminSalt),
+  passwordHash: hashPassword(devAdminPassword, adminSalt),
   role: "admin",
   activeWorkspaceId: "ws-admin-hq",
   workspaces: [
@@ -92,15 +113,15 @@ const ADMIN_USER: UserAccount = {
   createdAt: "2026-01-01T00:00:00Z",
 };
 
-// 2. Pre-configured Standard User Account
-const userSalt = "chatify_user_secure_salt_2026";
+// 2. Pre-configured Standard User Account (development sandbox only)
+const userSalt = generateSalt();
 const STANDARD_USER: UserAccount = {
   id: "usr-standard-002",
   email: "user@chatify.ai",
   name: "Nova Agency Manager",
   phone: "+1 (555) 789-2041",
   salt: userSalt,
-  passwordHash: hashPassword("UserPass2026!", userSalt),
+  passwordHash: hashPassword(devUserPassword, userSalt),
   role: "user",
   activeWorkspaceId: "ws-nova-agency",
   workspaces: [
@@ -126,9 +147,11 @@ const STANDARD_USER: UserAccount = {
 // In-Memory Durable Store for Runtime Users
 const userStore = new Map<string, UserAccount>();
 
-// Seed default users
-userStore.set(ADMIN_USER.email.toLowerCase(), ADMIN_USER);
-userStore.set(STANDARD_USER.email.toLowerCase(), STANDARD_USER);
+// Seed sandbox users (development only)
+if (isLocalUserStoreEnabled()) {
+  userStore.set(ADMIN_USER.email.toLowerCase(), ADMIN_USER);
+  userStore.set(STANDARD_USER.email.toLowerCase(), STANDARD_USER);
+}
 
 /**
  * Registers a new user with their own dedicated business workspace
@@ -139,6 +162,9 @@ export function registerUser(params: {
   businessName: string;
   password: string;
 }): { user: UserAccount; workspace: Workspace } {
+  if (!isLocalUserStoreEnabled()) {
+    throw new Error("Local user store is disabled in production");
+  }
   const normalizedEmail = params.email.trim().toLowerCase();
   const salt = generateSalt();
   const passwordHash = hashPassword(params.password, salt);
@@ -187,6 +213,9 @@ export function authenticateUser(
   email: string,
   plainPassword: string
 ): { success: boolean; user?: UserAccount; workspace?: Workspace; error?: string } {
+  if (!isLocalUserStoreEnabled()) {
+    return { success: false, error: "Invalid email or password." };
+  }
   const normalizedEmail = email.trim().toLowerCase();
   const user = userStore.get(normalizedEmail);
 
@@ -195,7 +224,7 @@ export function authenticateUser(
   }
 
   const computedHash = hashPassword(plainPassword, user.salt);
-  if (computedHash !== user.passwordHash) {
+  if (!safeEqualHex(computedHash, user.passwordHash)) {
     return { success: false, error: "Invalid email or password." };
   }
 

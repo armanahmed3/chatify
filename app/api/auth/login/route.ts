@@ -2,110 +2,103 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient, createAdminClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/security/ratelimit";
+import { verifyTotp } from "@/lib/security/totp";
 import { logger } from "@/lib/logger";
-import { authenticateUser } from "@/lib/auth/user-store";
+import { authenticateUser, isLocalUserStoreEnabled } from "@/lib/auth/user-store";
+import { getClientIp, serverError } from "@/lib/http";
 
 const loginSchema = z.object({
-  email: z.string().email().max(255),
+  email: z.string().trim().email().max(255),
   password: z.string().min(8).max(128),
-  mfaCode: z.string().length(6).optional(),
+  mfaCode: z
+    .string()
+    .regex(/^\d{6}$/)
+    .optional(),
 });
+
+const GENERIC_AUTH_ERROR = "Invalid email or password.";
 
 export async function POST(request: NextRequest) {
   try {
-    const clientIp =
-      request.ip ||
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      "unknown-ip";
+    const clientIp = getClientIp(request);
 
-    // 1. Stricter Rate Limiting on Login (5 attempts per 15 minutes)
-    const rateCheck = await checkRateLimit(clientIp, "AUTH_LOGIN");
-    if (!rateCheck.success) {
-      logger.warn("Brute-force login attempt throttled", { ip: clientIp });
+    const body = await request.json().catch(() => null);
+    const parsed = loginSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid email or password format." }, { status: 400 });
+    }
+    const { email, password, mfaCode } = parsed.data;
+
+    // 1. Brute-force lockdown: limit per IP AND per account (stops distributed credential stuffing).
+    const [ipCheck, accountCheck] = await Promise.all([
+      checkRateLimit(clientIp, "AUTH_LOGIN"),
+      checkRateLimit(`acct:${email.toLowerCase()}`, "AUTH_LOGIN"),
+    ]);
+    if (!ipCheck.success || !accountCheck.success) {
+      logger.warn("Login throttled", { ip: clientIp });
       return NextResponse.json(
-        {
-          error: "Too many failed login attempts. Your IP has been temporarily locked for 15 minutes.",
-        },
+        { error: "Too many login attempts. Please wait 15 minutes and try again." },
         {
           status: 429,
-          headers: {
-            "Retry-After": String(rateCheck.reset),
-          },
+          headers: { "Retry-After": String(Math.max(ipCheck.reset, accountCheck.reset)) },
         }
       );
     }
 
-    const body = await request.json();
-    const parsed = loginSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: "Invalid email or password format. Minimum 8 characters required." },
-        { status: 400 }
-      );
+    // 2. Local sandbox accounts — DEVELOPMENT ONLY (disabled when NODE_ENV=production).
+    if (isLocalUserStoreEnabled()) {
+      const localAuth = authenticateUser(email, password);
+      if (localAuth.success && localAuth.user && localAuth.workspace) {
+        logger.audit("user.login.success", {
+          userId: localAuth.user.id,
+          workspaceId: localAuth.workspace.id,
+          ip: clientIp,
+          status: "success",
+          mode: "dev-sandbox",
+        });
+
+        const response = NextResponse.json({
+          ok: true,
+          user: {
+            id: localAuth.user.id,
+            email: localAuth.user.email,
+            name: localAuth.user.name,
+            role: localAuth.user.role,
+          },
+          workspace: localAuth.workspace,
+          workspaces: localAuth.user.workspaces,
+        });
+        response.cookies.set("chatify_demo_session", "active", {
+          path: "/",
+          httpOnly: true,
+          secure: false,
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60,
+        });
+        response.cookies.set("chatify_active_ws", localAuth.workspace.id, {
+          path: "/",
+          httpOnly: false,
+          sameSite: "lax",
+          maxAge: 7 * 24 * 60 * 60,
+        });
+        return response;
+      }
     }
 
-    const { email, password, mfaCode } = parsed.data;
-
-    // 2. First authenticate against the local user store (Admin, Standard User, or Registered User)
-    const localAuth = authenticateUser(email, password);
-    if (localAuth.success && localAuth.user && localAuth.workspace) {
-      logger.audit("user.login.success", {
-        userId: localAuth.user.id,
-        email: localAuth.user.email,
-        role: localAuth.user.role,
-        workspaceId: localAuth.workspace.id,
-        ip: clientIp,
-        status: "success",
-      });
-
-      const response = NextResponse.json({
-        ok: true,
-        user: {
-          id: localAuth.user.id,
-          email: localAuth.user.email,
-          name: localAuth.user.name,
-          role: localAuth.user.role,
-        },
-        workspace: localAuth.workspace,
-        workspaces: localAuth.user.workspaces,
-      });
-
-      // Set session cookies
-      response.cookies.set("chatify_demo_session", "active", {
-        path: "/",
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60,
-      });
-
-      response.cookies.set("chatify_active_ws", localAuth.workspace.id, {
-        path: "/",
-        httpOnly: false,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60,
-      });
-
-      return response;
-    }
-
-    // 3. Fallback to Supabase Auth if connected
-    const supabase = createClient();
+    // 3. Supabase Auth (production path). Session JWTs are stored in httpOnly cookies by @supabase/ssr,
+    //    never in localStorage.
+    const supabase = await createClient();
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
 
     if (authError || !authData.user) {
-      logger.warn("Failed login attempt", { ip: clientIp, email: email.slice(0, 3) + "***" });
-      return NextResponse.json(
-        { error: "Invalid email or password." },
-        { status: 401 }
-      );
+      logger.warn("Failed login attempt", { ip: clientIp });
+      return NextResponse.json({ error: GENERIC_AUTH_ERROR }, { status: 401 });
     }
 
-    // Check if MFA is required for this user profile
+    // 4. Multi-factor authentication (RFC 6238 TOTP).
     const adminDb = createAdminClient();
     const { data: profile } = await adminDb
       .from("profiles")
@@ -114,19 +107,18 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (profile?.mfa_enabled) {
-      if (!mfaCode) {
-        return NextResponse.json({
-          mfaRequired: true,
-          message: "Multi-factor authentication (MFA) code required.",
-        });
-      }
-
-      const isMfaValid = mfaCode.length === 6;
-      if (!isMfaValid) {
-        return NextResponse.json(
-          { error: "Invalid multi-factor authentication code." },
-          { status: 401 }
-        );
+      const mfaOk = !!mfaCode && verifyTotp(profile.mfa_secret, mfaCode);
+      if (!mfaOk) {
+        // Do NOT leave a half-authenticated session behind.
+        await supabase.auth.signOut();
+        if (!mfaCode) {
+          return NextResponse.json({
+            mfaRequired: true,
+            message: "Enter the 6-digit code from your authenticator app.",
+          });
+        }
+        logger.warn("Invalid MFA code", { userId: authData.user.id, ip: clientIp });
+        return NextResponse.json({ error: "Invalid authentication code." }, { status: 401 });
       }
     }
 
@@ -136,28 +128,11 @@ export async function POST(request: NextRequest) {
       status: "success",
     });
 
-    const response = NextResponse.json({
+    return NextResponse.json({
       ok: true,
-      user: {
-        id: authData.user.id,
-        email: authData.user.email,
-      },
+      user: { id: authData.user.id, email: authData.user.email },
     });
-
-    response.cookies.set("chatify_demo_session", "active", {
-      path: "/",
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 7 * 24 * 60 * 60,
-    });
-
-    return response;
-  } catch (err: any) {
-    logger.error("Authentication server exception", err);
-    return NextResponse.json(
-      { error: "An unexpected authentication error occurred." },
-      { status: 500 }
-    );
+  } catch (err) {
+    return serverError(err, "auth.login");
   }
 }

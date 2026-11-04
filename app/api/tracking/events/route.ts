@@ -1,4 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { serverError, getClientIp } from "@/lib/http";
+import { checkRateLimit } from "@/lib/security/ratelimit";
+
+const MAX_TRACKED_VISITORS = 5000;
+const str = (max: number) => z.string().max(max);
+const trackingSchema = z.object({
+  visitorId: z.string().min(1).max(100).regex(/^[\w-]+$/),
+  eventType: z.enum(["arrival", "page_view", "section_view", "click", "chat_open"]).default("page_view"),
+  url: str(2000).default(""),
+  pathname: str(500).default("/"),
+  title: str(300).default("Website Page"),
+  referrer: str(2000).default("Direct"),
+  device: str(50).default("Desktop"),
+  browser: str(100).default("Chrome"),
+  section: str(200).optional(),
+  elementText: str(200).optional(),
+  elementTag: str(30).optional(),
+});
 
 export interface VisitorAction {
   id: string;
@@ -34,29 +53,33 @@ let latestNewVisitorTimestamp: number = 0;
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const rl = await checkRateLimit(getClientIp(request), "CHAT_WIDGET");
+    if (!rl.success) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+    }
+
+    const parsed = trackingSchema.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid tracking payload" }, { status: 400 });
+    }
     const {
       visitorId,
-      eventType = "page_view",
-      url = "",
-      pathname = "/",
-      title = "Website Page",
-      referrer = "Direct",
-      device = "Desktop",
-      browser = "Chrome",
+      eventType,
+      url,
+      pathname,
+      title,
+      referrer,
+      device,
+      browser,
       section,
       elementText,
       elementTag,
-    } = body;
-
-    if (!visitorId) {
-      return NextResponse.json({ error: "visitorId is required" }, { status: 400 });
-    }
+    } = parsed.data;
 
     const now = new Date();
     const nowIso = now.toISOString();
 
-    const clientIp = request.ip || request.headers.get("x-forwarded-for") || "127.0.0.1";
+    const clientIp = getClientIp(request);
     const ipMasked = clientIp.includes(".")
       ? clientIp.split(".").slice(0, 3).join(".") + ".xxx"
       : "masked-visitor";
@@ -89,6 +112,10 @@ export async function POST(request: NextRequest) {
       elementText,
       timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     };
+
+    if (isFirstTime && globalVisitorStore.size >= MAX_TRACKED_VISITORS) {
+      return NextResponse.json({ ok: true, tracked: false });
+    }
 
     if (isFirstTime) {
       visitor = {
@@ -138,7 +165,7 @@ export async function POST(request: NextRequest) {
       action: actionDescription,
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message || "Failed to record telemetry" }, { status: 500 });
+    return serverError(err, "tracking.events.post");
   }
 }
 

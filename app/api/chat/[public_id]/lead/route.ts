@@ -2,25 +2,39 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/server";
 import { Resend } from "resend";
+import { serverError, getClientIp, escapeHtml } from "@/lib/http";
+import { checkRateLimit } from "@/lib/security/ratelimit";
+import { resolvePublicBot, conversationBelongsTo, allowDemoBots } from "@/lib/chat/public-bot";
+import { logger } from "@/lib/logger";
 
 const leadSchema = z.object({
-  name: z.string().optional().nullable(),
-  email: z.string().optional().nullable(),
-  phone: z.string().optional().nullable(),
-  requirements: z.string().optional().nullable(),
-  conversation_id: z.string().optional().nullable(),
+  name: z.string().max(120).optional().nullable(),
+  email: z.string().max(255).optional().nullable(),
+  phone: z.string().max(40).optional().nullable(),
+  requirements: z.string().max(2000).optional().nullable(),
+  conversation_id: z.string().max(100).optional().nullable(),
+  session_id: z.string().max(100).optional().nullable(),
 });
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { public_id: string } }
+  props: { params: Promise<{ public_id: string }> }
 ) {
+  const params = await props.params;
   try {
-    const json = await request.json();
-    const parsed = leadSchema.safeParse(json);
+    const rate = await checkRateLimit(getClientIp(request), "WIDGET_SUBMIT");
+    if (!rate.success) {
+      return NextResponse.json({ error: "Too many submissions. Please try again later." }, { status: 429 });
+    }
 
+    const parsed = leadSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid lead details." }, { status: 400 });
+    }
+
+    const bot = await resolvePublicBot(params.public_id);
+    if (!bot && !allowDemoBots()) {
+      return NextResponse.json({ error: "Chatbot not found." }, { status: 404 });
     }
 
     const raw = parsed.data;
@@ -32,73 +46,77 @@ export async function POST(
     const rawPhone = raw.phone?.trim() || "";
     const phone = rawPhone.replace(/[^\d+]/g, "").length >= 7 ? rawPhone : "Not Given";
     const requirements = raw.requirements?.trim() ? raw.requirements.trim() : "Direct inquiry";
-    const conversation_id = raw.conversation_id || null;
+
+    // Only link a conversation that belongs to this bot + widget session (BOLA protection).
+    let conversation_id: string | null = null;
+    if (bot && raw.conversation_id && raw.session_id) {
+      if (await conversationBelongsTo(raw.conversation_id, bot, raw.session_id)) {
+        conversation_id = raw.conversation_id;
+      }
+    }
 
     // Automatic lead qualification scoring
     let score: "hot" | "warm" | "cold" = "warm";
     const reqLower = requirements.toLowerCase();
     if (
-      phone &&
-      (reqLower.includes("book") ||
-        reqLower.includes("appointment") ||
-        reqLower.includes("emergency") ||
-        reqLower.includes("today") ||
-        reqLower.includes("tomorrow") ||
-        reqLower.includes("cost") ||
-        reqLower.includes("quote"))
+      phone !== "Not Given" &&
+      ["book", "appointment", "emergency", "today", "tomorrow", "cost", "quote"].some((k) =>
+        reqLower.includes(k)
+      )
     ) {
       score = "hot";
     }
 
-    const supabase = createAdminClient();
+    let leadId: string | null = null;
+    if (bot) {
+      const supabase = createAdminClient();
+      const { data: lead } = await supabase
+        .from("leads")
+        .insert({
+          workspace_id: bot.workspace_id,
+          chatbot_id: bot.id,
+          name,
+          email,
+          phone,
+          requirements,
+          score,
+          qualification_status: "new",
+          conversation_id,
+        })
+        .select("id")
+        .single();
+      leadId = lead?.id ?? null;
+    }
 
-    // Insert lead into Supabase
-    const { data: lead, error: leadError } = await supabase
-      .from("leads")
-      .insert({
-        name,
-        email,
-        phone,
-        requirements,
-        score,
-        qualification_status: "new",
-        conversation_id: conversation_id || null,
-      })
-      .select()
-      .single();
-
-    // Send instant owner email alert via Resend on Hot leads
+    // Instant owner email alert on hot leads. All visitor-supplied values are HTML-escaped.
     const resendApiKey = process.env.RESEND_API_KEY;
-    if (resendApiKey && score === "hot") {
+    const recipient = process.env.OWNER_ALERT_EMAIL;
+    if (resendApiKey && recipient && score === "hot") {
       try {
         const resend = new Resend(resendApiKey);
         const sender = process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev";
-        const recipient = process.env.OWNER_ALERT_EMAIL || "flexfitfury9@gmail.com";
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "";
         await resend.emails.send({
           from: sender,
           to: recipient,
-          subject: `🔥 [Hot Lead Alert] ${name} wants an appointment!`,
+          subject: `[Hot Lead] ${name.replace(/[\r\n]/g, " ").slice(0, 60)} wants an appointment`,
           html: `
             <h2>New Hot Customer Lead Captured</h2>
-            <p><strong>Name:</strong> ${name}</p>
-            <p><strong>Phone:</strong> <a href="tel:${phone}">${phone}</a></p>
-            <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
-            <p><strong>Inquiry / Notes:</strong> ${requirements}</p>
+            <p><strong>Name:</strong> ${escapeHtml(name)}</p>
+            <p><strong>Phone:</strong> ${escapeHtml(phone)}</p>
+            <p><strong>Email:</strong> ${escapeHtml(email)}</p>
+            <p><strong>Inquiry / Notes:</strong> ${escapeHtml(requirements)}</p>
             <hr />
-            <p>View this conversation in your <a href="https://chatify.ai/dashboard/inbox">Chatify Unified Inbox</a>.</p>
+            <p>View this conversation in your <a href="${escapeHtml(appUrl)}/dashboard/inbox">Chatify Inbox</a>.</p>
           `,
         });
       } catch (err) {
-        // Log silently
+        logger.error("Hot lead alert email failed", err);
       }
     }
 
-    return NextResponse.json({
-      ok: true,
-      lead_id: lead?.id || `lead-${Date.now()}`,
-      score,
-    });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ ok: true, lead_id: leadId, score });
+  } catch (err) {
+    return serverError(err, "chat.lead");
   }
 }

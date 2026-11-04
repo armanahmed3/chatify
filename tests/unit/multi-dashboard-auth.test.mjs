@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+// Sandbox credentials are injected via env (no hardcoded defaults ship with the app).
+process.env.DEV_ADMIN_PASSWORD = "Test-Admin-Pass-1!";
+process.env.DEV_USER_PASSWORD = "Test-User-Pass-1!";
+
+const {
   authenticateUser,
   registerUser,
   getUserByEmail,
   addWorkspaceToUser,
-} from "../../lib/auth/user-store.ts";
+} = await import("../../lib/auth/user-store.ts");
 import {
   generateVerificationOtp,
   verifyOtp,
@@ -16,14 +20,14 @@ import {
 
 test("Multi-Dashboard Auth — Default Admin & User Authentication", () => {
   // 1. Admin login verifies with correct credentials
-  const adminAuth = authenticateUser("admin@chatify.ai", "AdminSecure2026!");
+  const adminAuth = authenticateUser("admin@chatify.ai", process.env.DEV_ADMIN_PASSWORD);
   assert.equal(adminAuth.success, true);
   assert.equal(adminAuth.user?.role, "admin");
   assert.equal(adminAuth.workspace?.name, "Chatify Enterprise HQ");
   assert.equal(adminAuth.workspace?.slug, "chatify-enterprise");
 
   // 2. Standard User login verifies with correct credentials
-  const userAuth = authenticateUser("user@chatify.ai", "UserPass2026!");
+  const userAuth = authenticateUser("user@chatify.ai", process.env.DEV_USER_PASSWORD);
   assert.equal(userAuth.success, true);
   assert.equal(userAuth.user?.role, "user");
   assert.equal(userAuth.workspace?.name, "Nova Marketing Agency");

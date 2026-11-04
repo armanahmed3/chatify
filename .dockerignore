@@ -1,0 +1,15 @@
+# Never bake secrets or local state into images
+.env
+.env.*
+!.env.example
+.git
+.github
+node_modules
+.next
+out
+coverage
+*.log
+tsconfig.tsbuildinfo
+tests/load
+.DS_Store
+CREDENTIALS*.md

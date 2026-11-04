@@ -10,29 +10,36 @@ import {
   computeDeviceFingerprint,
   checkTrialEligibility,
   recordActivatedTrial,
-  generateVerificationOtp,
-  verifyOtp,
+  issueOtp,
+  consumeOtp,
 } from "@/lib/security/anti-abuse";
+import { getClientIp, serverError, escapeHtml } from "@/lib/http";
 import { checkRateLimit } from "@/lib/security/ratelimit";
-import { createAdminClient } from "@/lib/supabase/server";
-import { registerUser } from "@/lib/auth/user-store";
+import { createAdminClient, createClient } from "@/lib/supabase/server";
+import crypto from "crypto";
+import { registerUser, isLocalUserStoreEnabled } from "@/lib/auth/user-store";
+import { logger } from "@/lib/logger";
+
+const IS_PROD = process.env.NODE_ENV === "production";
+/** Phone SMS verification is only enforced once an SMS provider is wired up. */
+const SMS_VERIFICATION_ENABLED = process.env.SMS_VERIFICATION_ENABLED === "true";
 import { Resend } from "resend";
 
 const signupActionSchema = z.object({
   step: z.enum(["request_otp", "verify_and_signup"]),
-  businessName: z.string().min(1).max(100),
-  email: z.string().email().max(255),
-  phone: z.string().min(7).max(30),
+  businessName: z.string().trim().min(1).max(100),
+  email: z.string().trim().email().max(255),
+  phone: z.string().trim().min(7).max(30).regex(/^[+\d\s().-]+$/, "Invalid phone number."),
   password: z.string().min(8).max(100),
-  emailOtpCode: z.string().optional(),
-  phoneOtpCode: z.string().optional(),
-  otpCode: z.string().optional(),
-  deviceToken: z.string().optional(),
+  emailOtpCode: z.string().max(6).optional(),
+  phoneOtpCode: z.string().max(6).optional(),
+  otpCode: z.string().max(6).optional(),
+  deviceToken: z.string().max(200).optional(),
 });
 
 export async function POST(request: NextRequest) {
   try {
-    const clientIp = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.ip || "127.0.0.1";
+    const clientIp = getClientIp(request);
     const userAgent = request.headers.get("user-agent") || "unknown-agent";
 
     // Rate limit signup attempts (max 20 per 15 minutes per IP)
@@ -44,7 +51,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
+    const body = await request.json().catch(() => null);
     const parsed = signupActionSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -119,8 +126,8 @@ export async function POST(request: NextRequest) {
 
     // STEP A: Request INDIVIDUAL Verification OTPs for both Email and Phone
     if (step === "request_otp") {
-      const emailOtp = generateVerificationOtp(normalizedEmail);
-      const phoneOtp = generateVerificationOtp(normalizedPhone);
+      const emailOtp = await issueOtp(normalizedEmail);
+      const phoneOtp = SMS_VERIFICATION_ENABLED || !IS_PROD ? await issueOtp(normalizedPhone) : null;
 
       let realEmailDelivered = false;
       let emailDeliveryNotice: string | null = null;
@@ -134,7 +141,7 @@ export async function POST(request: NextRequest) {
           const res = await resend.emails.send({
             from: from.includes("@") ? from : "onboarding@resend.dev",
             to: normalizedEmail,
-            subject: `🔐 Your Chatify Verification Code: ${emailOtp}`,
+            subject: "Your Chatify verification code",
             html: `
               <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background: #ffffff;">
                 <div style="text-align: center; margin-bottom: 20px;">
@@ -158,23 +165,31 @@ export async function POST(request: NextRequest) {
           if (!res.error) {
             realEmailDelivered = true;
           } else {
-            emailDeliveryNotice = res.error.message;
+            logger.warn("Verification email rejected by provider", { reason: res.error.message });
+            emailDeliveryNotice = "Email could not be delivered.";
           }
         } catch (e: any) {
-          emailDeliveryNotice = e?.message || "Email dispatch failed.";
+          logger.error("Verification email dispatch failed", e);
+          emailDeliveryNotice = "Email dispatch failed.";
         }
+      }
+
+      if (IS_PROD && !realEmailDelivered) {
+        return NextResponse.json(
+          { error: "We couldn't send your verification email right now. Please try again shortly." },
+          { status: 503 }
+        );
       }
 
       return NextResponse.json({
         ok: true,
         step: "otp_sent",
-        message: `Verification codes dispatched: one to email (${email}) and one via SMS (${phone}).`,
+        message: "Verification code sent. Please check your inbox.",
         realEmailDelivered,
-        emailDeliveryNotice,
-        // Always supply dev Otps for rapid test & sandbox environments
-        devEmailOtp: emailOtp,
-        devPhoneOtp: phoneOtp,
-        devOtp: emailOtp,
+        emailDeliveryNotice: IS_PROD ? null : emailDeliveryNotice,
+        phoneVerificationRequired: !!phoneOtp,
+        // Codes are ONLY echoed back in local development. Never in production.
+        ...(IS_PROD ? {} : { devEmailOtp: emailOtp, devPhoneOtp: phoneOtp, devOtp: emailOtp }),
       });
     }
 
@@ -190,7 +205,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      if (finalPhoneOtp.length !== 6) {
+      const phoneRequired = SMS_VERIFICATION_ENABLED || !IS_PROD;
+      if (phoneRequired && finalPhoneOtp.length !== 6) {
         return NextResponse.json(
           { error: "Please enter the 6-digit Phone SMS verification code.", field: "phoneOtp" },
           { status: 400 }
@@ -198,9 +214,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 1. Verify Email OTP individually
-      const isDemoEmail = process.env.NODE_ENV === "development" && finalEmailOtp === "777777";
-      if (!isDemoEmail) {
-        const emailValidation = verifyOtp(normalizedEmail, finalEmailOtp);
+      {
+        const emailValidation = await consumeOtp(normalizedEmail, finalEmailOtp);
         if (!emailValidation.valid) {
           return NextResponse.json(
             { error: `Email verification failed: ${emailValidation.error}`, field: "emailOtp" },
@@ -210,9 +225,8 @@ export async function POST(request: NextRequest) {
       }
 
       // 2. Verify Phone OTP individually
-      const isDemoPhone = process.env.NODE_ENV === "development" && finalPhoneOtp === "777777";
-      if (!isDemoPhone) {
-        const phoneValidation = verifyOtp(normalizedPhone, finalPhoneOtp);
+      if (phoneRequired) {
+        const phoneValidation = await consumeOtp(normalizedPhone, finalPhoneOtp);
         if (!phoneValidation.valid) {
           return NextResponse.json(
             { error: `Phone SMS verification failed: ${phoneValidation.error}`, field: "phoneOtp" },
@@ -229,7 +243,67 @@ export async function POST(request: NextRequest) {
         businessName,
       });
 
-      // 3. Register user and create dynamic isolated workspace
+      // 3a. PRODUCTION: Supabase Auth user + isolated workspace + owner membership.
+      if (!isLocalUserStoreEnabled()) {
+        const admin = createAdminClient();
+        const { data: created, error: createErr } = await admin.auth.admin.createUser({
+          email: normalizedEmail,
+          password,
+          email_confirm: true, // email ownership was proven by the OTP above
+          user_metadata: {
+            business_name: businessName,
+            phone: normalizedPhone,
+            trial_id: trialRecord.id,
+            trial_expires_at: trialRecord.trialExpiresAt,
+            plan: "starter_trial",
+          },
+        });
+        if (createErr || !created.user) {
+          logger.warn("Supabase signup failed", { reason: createErr?.message });
+          // Generic message: avoid account enumeration.
+          return NextResponse.json(
+            { error: "We couldn't create your account. If you already have one, please log in." },
+            { status: 400 }
+          );
+        }
+
+        const slug =
+          businessName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) +
+          "-" +
+          crypto.randomUUID().slice(0, 6);
+        const { data: ws, error: wsErr } = await admin
+          .from("workspaces")
+          .insert({ name: businessName, slug })
+          .select()
+          .single();
+        if (wsErr || !ws) {
+          await admin.auth.admin.deleteUser(created.user.id);
+          return serverError(wsErr, "auth.signup.workspace");
+        }
+        await admin
+          .from("workspace_members")
+          .insert({ workspace_id: ws.id, user_id: created.user.id, role: "owner" });
+
+        // Establish the session (httpOnly cookies via @supabase/ssr).
+        const supabase = await createClient();
+        await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+
+        logger.audit("user.signup.success", { userId: created.user.id, workspaceId: ws.id, ip: clientIp });
+
+        return NextResponse.json({
+          ok: true,
+          success: true,
+          message: "Email verified! Your dedicated workspace is active.",
+          trialDays: 7,
+          trialExpiresAt: trialRecord.trialExpiresAt,
+          businessName,
+          user: { id: created.user.id, email: normalizedEmail, name: businessName, role: "user" },
+          workspace: ws,
+          workspaces: [ws],
+        });
+      }
+
+      // 3b. DEVELOPMENT sandbox: in-memory user + workspace.
       const { user: newUser, workspace: newWorkspace } = registerUser({
         email: normalizedEmail,
         phone: normalizedPhone,
@@ -237,30 +311,10 @@ export async function POST(request: NextRequest) {
         password,
       });
 
-      // Try Supabase auth if configured
-      try {
-        const supabase = createAdminClient();
-        await supabase.auth.admin.createUser({
-          email: normalizedEmail,
-          password,
-          email_confirm: true,
-          user_metadata: {
-            business_name: businessName,
-            phone: normalizedPhone,
-            workspace_id: newWorkspace.id,
-            trial_id: trialRecord.id,
-            trial_expires_at: trialRecord.trialExpiresAt,
-            plan: "starter_trial",
-          },
-        });
-      } catch (e) {
-        // Fallback gracefully in demo/development environment
-      }
-
       const response = NextResponse.json({
         ok: true,
         success: true,
-        message: "Both Email and Phone verified successfully! Your dedicated workspace is active.",
+        message: "Verified successfully! Your dedicated workspace is active.",
         trialDays: 7,
         trialExpiresAt: trialRecord.trialExpiresAt,
         businessName,
@@ -274,19 +328,15 @@ export async function POST(request: NextRequest) {
         workspaces: newUser.workspaces,
       });
 
-      // Set secure session cookie
       response.cookies.set("chatify_demo_session", "active", {
         path: "/",
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
-        maxAge: 7 * 24 * 60 * 60, // 7 days
+        maxAge: 7 * 24 * 60 * 60,
       });
-
       response.cookies.set("chatify_active_ws", newWorkspace.id, {
         path: "/",
         httpOnly: false,
-        secure: process.env.NODE_ENV === "production",
         sameSite: "lax",
         maxAge: 7 * 24 * 60 * 60,
       });
@@ -295,10 +345,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: "Invalid signup step." }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || "An unexpected error occurred during signup." },
-      { status: 500 }
-    );
+  } catch (err) {
+    return serverError(err, "auth.signup");
   }
 }

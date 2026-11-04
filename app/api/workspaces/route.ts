@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError } from "@/lib/http";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createAdminClient } from "@/lib/supabase/server";
 
 const createWorkspaceSchema = z.object({
   name: z.string().min(2).max(100),
-  accent_color: z.string().optional().default("#18181b"),
-  currency: z.string().optional().default("USD"),
-  avg_job_value: z.number().optional().default(300),
+  accent_color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional().default("#18181b"),
+  currency: z.string().regex(/^[A-Z]{3}$/).optional().default("USD"),
+  avg_job_value: z.number().min(0).max(1_000_000).optional().default(300),
 });
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
+    if (!user && process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
     if (!user) {
       // In development fallback without live Supabase session
       return NextResponse.json({
@@ -36,12 +40,12 @@ export async function GET(request: NextRequest) {
       .eq("workspace_members.user_id", user.id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return serverError(error, "workspaces", 400);
     }
 
     return NextResponse.json({ workspaces: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "workspaces");
   }
 }
 
@@ -51,15 +55,18 @@ export async function POST(request: NextRequest) {
     const parsed = createWorkspaceSchema.safeParse(json);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid workspace details." }, { status: 400 });
     }
 
     const { name, accent_color, currency, avg_job_value } = parsed.data;
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + Math.random().toString(36).substring(2, 6);
 
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
+    if (!user && process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
     if (!user) {
       return NextResponse.json({
         workspace: {
@@ -73,8 +80,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Insert workspace
-    const { data: ws, error: wsError } = await supabase
+    // Insert workspace + owner membership with the service role (after the auth check above);
+    // RLS intentionally has no INSERT policy on workspaces/workspace_members for end users.
+    const admin = createAdminClient();
+    const { data: ws, error: wsError } = await admin
       .from("workspaces")
       .insert({
         name,
@@ -87,11 +96,11 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (wsError) {
-      return NextResponse.json({ error: wsError.message }, { status: 400 });
+      return serverError(wsError, "workspaces", 400);
     }
 
     // Add owner membership
-    await supabase.from("workspace_members").insert({
+    await admin.from("workspace_members").insert({
       workspace_id: ws.id,
       user_id: user.id,
       role: "owner",
@@ -99,6 +108,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ workspace: ws }, { status: 201 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "workspaces");
   }
 }

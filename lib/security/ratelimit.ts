@@ -29,7 +29,8 @@ function cleanOldMemoryRecords(windowMs: number) {
 
 // Periodically clean memory store every 5 minutes
 if (typeof setInterval !== "undefined") {
-  const timer = setInterval(() => cleanOldMemoryRecords(60000), 300000);
+  // Use the longest tier window so long-window (login) history is not discarded early.
+  const timer = setInterval(() => cleanOldMemoryRecords(60 * 60 * 1000), 300000);
   if (timer && typeof timer.unref === "function") {
     timer.unref();
   }
@@ -74,7 +75,10 @@ if (
   !process.env.UPSTASH_REDIS_REST_URL.includes("placeholder")
 ) {
   try {
-    upstashRedisClient = Redis.fromEnv();
+    upstashRedisClient = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
   } catch (err) {
     upstashRedisClient = null;
   }
@@ -90,6 +94,10 @@ export const RATE_LIMIT_TIERS = {
   AUTH_SIGNUP: { maxRequests: 20, windowMs: 15 * 60 * 1000 },
   // Chat Widget per IP (30 queries per minute)
   CHAT_WIDGET: { maxRequests: 30, windowMs: 60 * 1000 },
+  // Per-bot global ceiling across all visitors (600 msgs / minute)
+  CHAT_BOT_GLOBAL: { maxRequests: 600, windowMs: 60 * 1000 },
+  // Lead / feedback submissions from the public widget (10 per 10 minutes per IP)
+  WIDGET_SUBMIT: { maxRequests: 10, windowMs: 10 * 60 * 1000 },
   // Ingest / Training per workspace (15 imports per minute)
   TRAINING_INGEST: { maxRequests: 15, windowMs: 60 * 1000 },
   // General API endpoints (100 requests per minute)
@@ -97,6 +105,8 @@ export const RATE_LIMIT_TIERS = {
   // Webhook endpoints (60 requests per minute)
   WEBHOOKS: { maxRequests: 60, windowMs: 60 * 1000 },
 };
+
+const limiterCache = new Map<string, Ratelimit>();
 
 /**
  * Verifies if the request is within rate limits.
@@ -109,12 +119,17 @@ export async function checkRateLimit(
 
   if (upstashRedisClient) {
     try {
-      const windowSeconds = Math.max(1, Math.round(config.windowMs / 1000));
-      const limiter = new Ratelimit({
-        redis: upstashRedisClient,
-        limiter: Ratelimit.slidingWindow(config.maxRequests, `${windowSeconds} s`),
-        prefix: `chatify:ratelimit:${tier.toLowerCase()}`,
-      });
+      let limiter = limiterCache.get(tier);
+      if (!limiter) {
+        const windowSeconds = Math.max(1, Math.round(config.windowMs / 1000));
+        limiter = new Ratelimit({
+          redis: upstashRedisClient,
+          limiter: Ratelimit.slidingWindow(config.maxRequests, `${windowSeconds} s`),
+          prefix: `chatify:ratelimit:${tier.toLowerCase()}`,
+          ephemeralCache: new Map(),
+        });
+        limiterCache.set(tier, limiter);
+      }
 
       const res = await limiter.limit(identifier);
       return {

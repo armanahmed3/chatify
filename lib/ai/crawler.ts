@@ -3,7 +3,7 @@
  * Extracts clean, high-density text from real websites, Facebook pages, and Instagram profiles.
  */
 
-import { assertSafeUrl } from "../security/ssrf.ts";
+import { assertSafeUrl, safeFetch } from "../security/ssrf.ts";
 
 export interface CrawledPage {
   url: string;
@@ -193,9 +193,8 @@ export async function crawlWebsiteUrl(
 
   try {
     // 1. Fetch main landing page
-    const res = await fetch(targetUrl, {
+    const res = await safeFetch(targetUrl, {
       headers: COMMON_BROWSER_HEADERS,
-      redirect: "follow",
       signal: AbortSignal.timeout(10000),
     });
 
@@ -230,10 +229,9 @@ export async function crawlWebsiteUrl(
       await Promise.allSettled(
         subLinks.map(async (subUrl) => {
           try {
-            const subRes = await fetch(subUrl, {
+            const subRes = await safeFetch(subUrl, {
               headers: COMMON_BROWSER_HEADERS,
-              redirect: "follow",
-              signal: AbortSignal.timeout(8000),
+                      signal: AbortSignal.timeout(8000),
             });
             if (subRes.ok) {
               const subHtml = await subRes.text();
@@ -307,9 +305,8 @@ export async function crawlFacebookUrl(rawUrl: string): Promise<CrawlResult> {
   } catch {}
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await safeFetch(targetUrl, {
       headers: COMMON_BROWSER_HEADERS,
-      redirect: "follow",
       signal: AbortSignal.timeout(8000),
     });
 
@@ -397,13 +394,12 @@ export async function crawlInstagramUrl(rawUrl: string): Promise<CrawlResult> {
   } catch {}
 
   try {
-    const res = await fetch(targetUrl, {
+    const res = await safeFetch(targetUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      redirect: "follow",
       signal: AbortSignal.timeout(8000),
     });
 

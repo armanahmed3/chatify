@@ -72,6 +72,7 @@ function SignupForm() {
   const [realEmailDelivered, setRealEmailDelivered] = useState<boolean>(false);
   const [devEmailOtp, setDevEmailOtp] = useState<string | null>(null);
   const [devPhoneOtp, setDevPhoneOtp] = useState<string | null>(null);
+  const [phoneVerificationRequired, setPhoneVerificationRequired] = useState(true);
   const [countdown, setCountdown] = useState(0);
 
   // Google Modal State
@@ -255,6 +256,7 @@ function SignupForm() {
 
       setStep("verify_otp");
       setRealEmailDelivered(Boolean(data.realEmailDelivered));
+      setPhoneVerificationRequired(data.phoneVerificationRequired !== false);
       setSuccessNotice(`Individual verification codes sent to ${targetEmail} and ${targetPhone}.`);
 
       if (data.devEmailOtp) {
@@ -293,7 +295,7 @@ function SignupForm() {
       return;
     }
 
-    if (phoneOtpCode.trim().length !== 6) {
+    if (phoneVerificationRequired && phoneOtpCode.trim().length !== 6) {
       setError("Please enter the 6-digit Phone SMS verification code.");
       setLoading(false);
       return;
@@ -647,6 +649,7 @@ function SignupForm() {
               </div>
 
               {/* Box 2: Phone SMS Code Input */}
+              {phoneVerificationRequired && (
               <div className="rounded-xl border border-border/80 bg-card p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold text-foreground flex items-center gap-1.5">
@@ -679,11 +682,12 @@ function SignupForm() {
                   </div>
                 )}
               </div>
+              )}
 
               <Button
                 type="submit"
                 className="w-full h-11 sm:h-10 min-h-[44px] text-sm sm:text-xs font-bold gap-1.5 shadow-md bg-emerald-600 hover:bg-emerald-500 text-white"
-                disabled={loading || emailOtpCode.length !== 6 || phoneOtpCode.length !== 6}
+                disabled={loading || emailOtpCode.length !== 6 || (phoneVerificationRequired && phoneOtpCode.length !== 6)}
               >
                 {loading ? (
                   <>

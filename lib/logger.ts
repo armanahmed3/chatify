@@ -17,18 +17,41 @@ const SENSITIVE_KEYS = new Set([
   "card_number",
   "cvv",
   "client_secret",
+  "mfa_secret",
+  "mfacode",
+  "otp",
+  "cookie",
+  "set-cookie",
 ]);
+
+function maskEmail(v: string) {
+  const [user, domain] = v.split("@");
+  return domain ? `${user.slice(0, 2)}***@${domain}` : "***";
+}
 
 function redactValue(key: string, value: any): any {
   if (value === null || value === undefined) return value;
   
   if (typeof value === "string") {
     const lowerKey = key.toLowerCase();
-    if (SENSITIVE_KEYS.has(lowerKey) || lowerKey.includes("secret") || lowerKey.includes("token") || lowerKey.includes("key")) {
+    if (
+      SENSITIVE_KEYS.has(lowerKey) ||
+      lowerKey.includes("secret") ||
+      lowerKey.includes("token") ||
+      lowerKey.includes("key") ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("otp")
+    ) {
       return "[REDACTED]";
     }
+    // PII: mask emails and phone numbers
+    if (lowerKey.includes("email")) return maskEmail(value);
+    if (lowerKey.includes("phone")) return value.length > 4 ? `***${value.slice(-2)}` : "***";
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) return maskEmail(value);
+    // JWTs
+    if (/^eyJ[\w-]+\.[\w-]+\.[\w-]+$/.test(value)) return "[REDACTED]";
     // Check if looks like a bearer token or API key
-    if (value.startsWith("Bearer ") || value.startsWith("gsk_") || value.startsWith("re_") || value.startsWith("sk_")) {
+    if (value.startsWith("Bearer ") || value.startsWith("gsk_") || value.startsWith("re_") || value.startsWith("sk_") || value.startsWith("whsec_") || value.startsWith("AQ.")) {
       return "[REDACTED]";
     }
     return value;
@@ -75,7 +98,10 @@ export const logger = {
       level: "error",
       timestamp: new Date().toISOString(),
       message,
-      error: err instanceof Error ? { message: err.message, name: err.name } : err,
+      error:
+        err instanceof Error
+          ? { message: err.message, name: err.name, ...(process.env.NODE_ENV !== "production" ? { stack: err.stack } : {}) }
+          : redactValue("error", err),
       ...(meta ? redactValue("meta", meta) : {}),
     };
     console.error(JSON.stringify(payload));

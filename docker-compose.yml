@@ -1,22 +1,29 @@
-version: "3.9"
-
+# Local production-like stack. Secrets come from .env.production (gitignored) — never inline them here.
+# Rate limiting / caching use Upstash Redis over HTTPS (UPSTASH_REDIS_REST_URL), not a local redis socket.
 services:
-  # Chatify Web Application Service
   chatify-app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # NEXT_PUBLIC_* values are inlined into the client bundle at build time
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     image: chatify-platform:latest
-    restart: always
-    ports:
-      - "3000:3000"
+    restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
       - NODE_ENV=production
-      - NEXT_PUBLIC_APP_URL=http://localhost:3000
-      - UPSTASH_REDIS_REST_URL=http://redis:6379
-    depends_on:
-      redis:
-        condition: service_healthy
+    ports:
+      - "3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    security_opt:
+      - no-new-privileges:true
     deploy:
       replicas: 2
       resources:
@@ -32,21 +39,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-
-  # Redis Distributed Cache & Token-Bucket Rate Limiter
-  redis:
-    image: redis:7-alpine
-    restart: always
-    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-volumes:
-  redis-data:

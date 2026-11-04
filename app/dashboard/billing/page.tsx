@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useWorkspace } from "@/components/dashboard/workspace-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +18,7 @@ import {
 } from "lucide-react";
 
 export default function BillingPage() {
+  const { activeWorkspace } = useWorkspace();
   const [currentPlan, setCurrentPlan] = useState("starter");
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
@@ -32,7 +34,7 @@ export default function BillingPage() {
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: planKey }),
+        body: JSON.stringify({ plan: planKey, workspace_id: activeWorkspace.id }),
       });
       const data = await res.json();
       if (data.checkout_url) {
@@ -47,7 +49,11 @@ export default function BillingPage() {
 
   const handleOpenPortal = async () => {
     try {
-      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const res = await fetch("/api/billing/portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace_id: activeWorkspace.id }),
+      });
       const data = await res.json();
       if (data.portal_url) {
         window.location.href = data.portal_url;

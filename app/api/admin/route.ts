@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError, getClientIp } from "@/lib/http";
 import { z } from "zod";
-import { createAdminClient } from "@/lib/supabase/server.ts";
+import { createAdminClient } from "@/lib/supabase/server";
 import { verifySuperAdmin, recordAuditLog } from "@/lib/auth/guard";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 
 const patchAdminSchema = z.object({
-  workspace_id: z.string().min(1),
+  workspace_id: z.string().uuid(),
   is_suspended: z.boolean(),
 });
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: adminAuth.error }, { status: 403 });
     }
 
-    const rateCheck = await checkRateLimit(request.ip || "admin-client", "GENERAL_API");
+    const rateCheck = await checkRateLimit(getClientIp(request), "GENERAL_API");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -50,7 +51,7 @@ export async function GET(request: NextRequest) {
       ],
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "admin");
   }
 }
 
@@ -64,7 +65,7 @@ export async function PATCH(request: NextRequest) {
     const json = await request.json();
     const parsed = patchAdminSchema.safeParse(json);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid request." }, { status: 400 });
     }
 
     const { workspace_id, is_suspended } = parsed.data;
@@ -85,6 +86,6 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ ok: true, is_suspended });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "admin");
   }
 }

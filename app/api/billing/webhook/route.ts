@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getClientIp } from "@/lib/http";
 import { stripe, handleStripeWebhookEvent } from "@/lib/billing/stripe";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 import { logger } from "@/lib/logger";
 
 export async function POST(request: NextRequest) {
-  const rateCheck = await checkRateLimit(request.ip || "stripe-webhook", "WEBHOOKS");
+  const rateCheck = await checkRateLimit(getClientIp(request), "WEBHOOKS");
   if (!rateCheck.success) {
     return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }
@@ -21,7 +22,7 @@ export async function POST(request: NextRequest) {
         process.env.STRIPE_WEBHOOK_SECRET
       );
     } else {
-      if (process.env.NODE_ENV === "production") {
+      if (process.env.NODE_ENV !== "development") {
         logger.error("STRIPE_WEBHOOK_SECRET is not configured in production environment");
         return NextResponse.json({ error: "Webhook configuration error" }, { status: 500 });
       }
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
     await handleStripeWebhookEvent(event);
     return NextResponse.json({ received: true });
   } catch (err: any) {
-    logger.warn("Stripe webhook verification failed", { error: err.message });
-    return NextResponse.json({ error: `Webhook error: ${err.message}` }, { status: 400 });
+    logger.warn("Stripe webhook verification failed", { reason: err?.message });
+    return NextResponse.json({ error: "Webhook verification failed." }, { status: 400 });
   }
 }

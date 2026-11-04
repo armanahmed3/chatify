@@ -96,3 +96,73 @@ export function assertSafeUrl(rawUrl: string): { isValid: boolean; error?: strin
     return { isValid: false, error: `Invalid URL format: ${err?.message || "unparseable"}` };
   }
 }
+
+/**
+ * IPv6 private / loopback / link-local / unique-local / IPv4-mapped detection.
+ */
+export function isPrivateIpv6(ip: string): boolean {
+  const v = ip.toLowerCase().replace(/^\[|\]$/g, "");
+  if (v === "::1" || v === "::") return true;
+  if (v.startsWith("fc") || v.startsWith("fd")) return true; // fc00::/7 unique local
+  if (/^fe[89ab]/.test(v)) return true; // fe80::/10 link-local
+  const mapped = v.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateOrReservedIp(mapped[1]);
+  return false;
+}
+
+/**
+ * Resolves the hostname via DNS and rejects if ANY resolved address is private/reserved.
+ * Defeats "public-looking hostname that points at 127.0.0.1 / 169.254.169.254" attacks.
+ */
+export async function assertSafeUrlResolved(
+  rawUrl: string
+): Promise<{ isValid: boolean; error?: string; safeUrl?: string }> {
+  const basic = assertSafeUrl(rawUrl);
+  if (!basic.isValid || !basic.safeUrl) return basic;
+  const host = new URL(basic.safeUrl).hostname.replace(/^\[|\]$/g, "");
+  if (host.includes(":") && isPrivateIpv6(host)) {
+    return { isValid: false, error: "Private IPv6 address is forbidden (SSRF protection)." };
+  }
+  try {
+    const dns = await import("dns/promises");
+    const addrs = await dns.lookup(host, { all: true, verbatim: true });
+    for (const { address, family } of addrs) {
+      const bad = family === 6 ? isPrivateIpv6(address) : isPrivateOrReservedIp(address);
+      if (bad) {
+        return { isValid: false, error: `Host '${host}' resolves to a private address (SSRF protection).` };
+      }
+    }
+  } catch {
+    return { isValid: false, error: `Host '${host}' could not be resolved.` };
+  }
+  return basic;
+}
+
+/**
+ * fetch() wrapper for user-supplied URLs: validates every hop (including redirects) against SSRF rules,
+ * caps redirects, and enforces a timeout.
+ */
+export async function safeFetch(
+  rawUrl: string,
+  init: RequestInit & { timeoutMs?: number } = {},
+  maxRedirects = 3
+): Promise<Response> {
+  let current = rawUrl;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const check = await assertSafeUrlResolved(current);
+    if (!check.isValid || !check.safeUrl) {
+      throw new Error(`SSRF Validation Failed: ${check.error}`);
+    }
+    const res = await fetch(check.safeUrl, {
+      ...init,
+      redirect: "manual",
+      signal: init.signal ?? AbortSignal.timeout(init.timeoutMs ?? 10000),
+    });
+    if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
+      current = new URL(res.headers.get("location")!, check.safeUrl).toString();
+      continue;
+    }
+    return res;
+  }
+  throw new Error("Too many redirects.");
+}

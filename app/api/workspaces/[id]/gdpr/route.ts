@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server.ts";
+import { serverError, getClientIp } from "@/lib/http";
+import { createAdminClient } from "@/lib/supabase/server";
 import { verifyWorkspaceAccess, recordAuditLog } from "@/lib/auth/guard";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 
@@ -9,12 +10,13 @@ import { checkRateLimit } from "@/lib/security/ratelimit";
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params;
   try {
     const workspaceId = params.id;
 
-    const rateCheck = await checkRateLimit(request.ip || "gdpr-export", "GENERAL_API");
+    const rateCheck = await checkRateLimit(getClientIp(request), "GENERAL_API");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -52,7 +54,7 @@ export async function GET(
 
     return NextResponse.json(exportPayload);
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "workspaces.[id].gdpr");
   }
 }
 
@@ -62,12 +64,13 @@ export async function GET(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params;
   try {
     const workspaceId = params.id;
 
-    const rateCheck = await checkRateLimit(request.ip || "gdpr-delete", "GENERAL_API");
+    const rateCheck = await checkRateLimit(getClientIp(request), "GENERAL_API");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -95,6 +98,6 @@ export async function DELETE(
       message: "Workspace and all associated vector embeddings permanently deleted.",
     });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "workspaces.[id].gdpr");
   }
 }

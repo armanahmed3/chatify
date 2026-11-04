@@ -3,6 +3,9 @@ import { z } from "zod";
 import { executeRagQuery } from "@/lib/ai/rag";
 import { createAdminClient } from "@/lib/supabase/server";
 import { checkRateLimit } from "@/lib/security/ratelimit";
+import { getClientIp } from "@/lib/http";
+import { logger } from "@/lib/logger";
+import { resolvePublicBot, conversationBelongsTo, allowDemoBots } from "@/lib/chat/public-bot";
 
 const chatRequestSchema = z.object({
   message: z.string().min(1).max(2000),
@@ -16,10 +19,11 @@ const chatRequestSchema = z.object({
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { public_id: string } }
+  props: { params: Promise<{ public_id: string }> }
 ) {
+  const params = await props.params;
   try {
-    const clientIp = request.ip || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown-client";
+    const clientIp = getClientIp(request);
     const rateCheck = await checkRateLimit(clientIp, "CHAT_WIDGET");
     if (!rateCheck.success) {
       return NextResponse.json(
@@ -38,22 +42,31 @@ export async function POST(
       );
     }
 
-    const json = await request.json();
+    const json = await request.json().catch(() => null);
     const parsed = chatRequestSchema.safeParse(json);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid chat request." }, { status: 400 });
     }
 
     const { message, conversation_id, session_id, history } = parsed.data;
     const publicId = params.public_id;
 
-    // Check origin / domain whitelist
-    const origin = request.headers.get("origin") || request.headers.get("referer") || "";
+    // Object-level authorization: resolve the bot from its public id.
+    const bot = await resolvePublicBot(publicId);
+    if (!bot && !allowDemoBots()) {
+      return NextResponse.json({ error: "Chatbot not found." }, { status: 404 });
+    }
+
+    // Per-bot ceiling protects tenants (and our AI budget) from a single abusive embed.
+    const botRate = await checkRateLimit(`bot:${publicId}`, "CHAT_BOT_GLOBAL");
+    if (!botRate.success) {
+      return NextResponse.json({ error: "This assistant is busy. Please try again shortly." }, { status: 429 });
+    }
 
     // Execute RAG pipeline
     const ragResult = await executeRagQuery({
-      botId: publicId,
+      botId: bot?.id || publicId,
       publicId,
       query: message,
       conversationHistory: history,
@@ -62,41 +75,42 @@ export async function POST(
     // Save conversation and message record in database
     const supabase = createAdminClient();
 
-    let convId = conversation_id;
-    if (!convId) {
-      // Find or create conversation
-      const { data: conv } = await supabase
-        .from("conversations")
-        .insert({
-          session_id,
-          channel: "web",
-          status: "active",
-        })
-        .select()
-        .single();
-      if (conv) convId = conv.id;
+    let convId: string | undefined;
+
+    if (bot) {
+      if (conversation_id && (await conversationBelongsTo(conversation_id, bot, session_id))) {
+        convId = conversation_id;
+      } else {
+        const { data: conv } = await supabase
+          .from("conversations")
+          .insert({
+            workspace_id: bot.workspace_id,
+            chatbot_id: bot.id,
+            session_id,
+            channel: "web",
+            status: "active",
+          })
+          .select("id")
+          .single();
+        if (conv) convId = conv.id;
+      }
     }
 
-    if (convId) {
-      // Record user message
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        sender_type: "user",
-        content: message,
-      });
+    if (bot && convId) {
+      await supabase.from("messages").insert([
+        { conversation_id: convId, sender_type: "user", content: message },
+        {
+          conversation_id: convId,
+          sender_type: "bot",
+          content: ragResult.answer,
+          citations: ragResult.citations,
+          confidence_score: ragResult.confidence,
+          sentiment: ragResult.sentiment,
+          intent: ragResult.intent,
+        },
+      ]);
 
-      // Record bot response
-      await supabase.from("messages").insert({
-        conversation_id: convId,
-        sender_type: "bot",
-        content: ragResult.answer,
-        citations: ragResult.citations,
-        confidence_score: ragResult.confidence,
-        sentiment: ragResult.sentiment,
-        intent: ragResult.intent,
-      });
-
-      // Auto-extract customer leads from chat text (regardless of format)
+      // Auto-extract customer leads from chat text
       try {
         const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
         const phoneRegex = /(\+?\d{1,4}[-.\s]?)?\(?\d{3,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}/;
@@ -104,13 +118,12 @@ export async function POST(
         const phoneMatch = message.match(phoneRegex);
 
         if (emailMatch || phoneMatch) {
-          const detectedEmail = emailMatch ? emailMatch[1] : "Not Given";
-          const detectedPhone = phoneMatch ? phoneMatch[0].trim() : "Not Given";
-
           await supabase.from("leads").insert({
+            workspace_id: bot.workspace_id,
+            chatbot_id: bot.id,
             name: "Website Visitor",
-            email: detectedEmail,
-            phone: detectedPhone,
+            email: emailMatch ? emailMatch[1] : "Not Given",
+            phone: phoneMatch ? phoneMatch[0].trim() : "Not Given",
             requirements: message.slice(0, 300),
             score: "hot",
             qualification_status: "new",
@@ -118,7 +131,7 @@ export async function POST(
           });
         }
       } catch (leadExtractErr) {
-        // Silently continue
+        logger.warn("Lead auto-extraction failed", { publicId });
       }
     }
 
@@ -142,6 +155,7 @@ export async function POST(
 
     return response;
   } catch (err: any) {
+    logger.error("chat.widget failed", err);
     return NextResponse.json(
       {
         answer:

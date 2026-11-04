@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError } from "@/lib/http";
 import { z } from "zod";
 import { crawlWebsiteUrl, crawlFacebookUrl, crawlInstagramUrl, normalizeCrawlUrl } from "@/lib/ai/crawler";
-import { assertSafeUrl } from "@/lib/security/ssrf";
+import { assertSafeUrlResolved } from "@/lib/security/ssrf";
+import { getAuthenticatedUser } from "@/lib/auth/guard";
+import { getClientIp } from "@/lib/http";
 import { checkRateLimit } from "@/lib/security/ratelimit";
 
 const crawlSchema = z.object({
@@ -12,7 +15,12 @@ const crawlSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const rateCheck = await checkRateLimit(request.ip || "crawler-client", "TRAINING_INGEST");
+    const user = await getAuthenticatedUser();
+    if (!user) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const rateCheck = await checkRateLimit(`crawl:${user.userId}:${getClientIp(request)}`, "TRAINING_INGEST");
     if (!rateCheck.success) {
       return NextResponse.json(
         { error: "Too many crawl requests. Please wait a moment." },
@@ -24,14 +32,14 @@ export async function POST(request: NextRequest) {
     const parsed = crawlSchema.safeParse(body);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid crawl request." }, { status: 400 });
     }
 
     const { type, url: rawUrl, max_pages } = parsed.data;
     const normalizedUrl = normalizeCrawlUrl(rawUrl);
 
     // Verify SSRF safety
-    const ssrf = assertSafeUrl(normalizedUrl);
+    const ssrf = await assertSafeUrlResolved(normalizedUrl);
     if (!ssrf.isValid) {
       return NextResponse.json({ error: `Forbidden URL: ${ssrf.error}` }, { status: 400 });
     }
@@ -63,10 +71,7 @@ export async function POST(request: NextRequest) {
       crawledAt: new Date().toISOString(),
     });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message || "Failed to crawl target source." },
-      { status: 500 }
-    );
+    return serverError(err, "crawl");
   }
 }
 

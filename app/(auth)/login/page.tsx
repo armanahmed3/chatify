@@ -13,6 +13,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,10 +27,20 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+          ...(mfaRequired && mfaCode ? { mfaCode: mfaCode.trim() } : {}),
+        }),
       });
 
       const data = await res.json();
+
+      if (data.mfaRequired) {
+        setMfaRequired(true);
+        setLoading(false);
+        return;
+      }
 
       if (!res.ok) {
         setError(data.error || "Invalid email or password.");
@@ -50,7 +62,7 @@ export default function LoginPage() {
       // Navigate to dashboard
       window.location.href = "/dashboard";
     } catch (err: any) {
-      setError(err?.message || "An unexpected error occurred. Please try again.");
+      setError("An unexpected error occurred. Please try again.");
       setLoading(false);
     }
   };
@@ -124,6 +136,26 @@ export default function LoginPage() {
               className="h-11 sm:h-10 text-base sm:text-xs"
             />
           </div>
+
+          {mfaRequired && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium flex items-center gap-1.5">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground" /> Authenticator code
+              </label>
+              <Input
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/\D/g, ""))}
+                placeholder="123456"
+                required
+                autoFocus
+                className="h-11 sm:h-10 text-base sm:text-xs tracking-widest"
+              />
+            </div>
+          )}
 
           <Button type="submit" className="w-full h-11 sm:h-10 min-h-[44px] text-sm sm:text-xs font-semibold gap-1.5" disabled={loading}>
             {loading ? (

@@ -1,23 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError } from "@/lib/http";
 import { z } from "zod";
-import { stripe } from "@/lib/billing/stripe.ts";
-import { PLANS } from "@/lib/plans.ts";
+import { stripe } from "@/lib/billing/stripe";
+import { PLANS } from "@/lib/plans";
+import { verifyWorkspaceAccess } from "@/lib/auth/guard";
 
 const checkoutSchema = z.object({
   plan: z.enum(["starter", "pro", "agency"]),
-  workspace_id: z.string().optional().default("ws-demo-001"),
+  workspace_id: z.string().min(1).max(100),
 });
 
 export async function POST(request: NextRequest) {
   try {
-    const json = await request.json();
-    const parsed = checkoutSchema.safeParse(json);
+    const parsed = checkoutSchema.safeParse(await request.json().catch(() => null));
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid checkout request." }, { status: 400 });
     }
 
     const { plan, workspace_id } = parsed.data;
+
+    // Only workspace owners may change billing (server-side permission enforcement).
+    const access = await verifyWorkspaceAccess(workspace_id, "owner");
+    if (!access.allowed) {
+      return NextResponse.json({ error: access.error }, { status: 403 });
+    }
     const planConfig = PLANS[plan];
 
     if (!planConfig) {
@@ -26,8 +33,11 @@ export async function POST(request: NextRequest) {
 
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-    // In test or local mode without live Stripe credentials, return simulated checkout
-    if (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes("placeholder")) {
+    // In local mode without live Stripe credentials, return simulated checkout (never in production)
+    if (
+      process.env.NODE_ENV !== "production" &&
+      (!process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET_KEY.includes("placeholder"))
+    ) {
       return NextResponse.json({
         checkout_url: `${appUrl}/dashboard/billing?success=true&plan=${plan}`,
       });
@@ -60,10 +70,7 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ checkout_url: session.url });
-  } catch (err: any) {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-    return NextResponse.json({
-      checkout_url: `${appUrl}/dashboard/billing?success=true`,
-    });
+  } catch (err) {
+    return serverError(err, "billing.checkout");
   }
 }

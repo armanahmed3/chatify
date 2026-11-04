@@ -28,7 +28,7 @@ export async function GET() {
   };
 
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const { error } = await supabase.from("templates").select("id").limit(1);
     health.checks.database = {
       status: error ? "fallback_mock" : "connected",
@@ -37,7 +37,6 @@ export async function GET() {
   } catch (err: any) {
     health.checks.database = {
       status: "fallback_mock",
-      error: err.message,
     };
   }
 

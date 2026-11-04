@@ -16,7 +16,7 @@ export const ALLOWED_IMAGE_MIMES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
-  "image/svg+xml",
+  // SVG intentionally NOT allowed: it can carry inline <script> (stored XSS).
 ]);
 
 /**
@@ -45,12 +45,25 @@ export function verifyMagicBytes(buffer: Uint8Array, mimeType: string): boolean 
     return buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04;
   }
 
-  // Text/CSV do not have fixed magic bytes, return true if text mime
-  if (mimeType === "text/plain" || mimeType === "text/csv") {
-    return true;
+  // WEBP: "RIFF"...."WEBP"
+  if (mimeType === "image/webp") {
+    return (
+      buffer.length >= 12 &&
+      buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+      buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50
+    );
   }
 
-  return true;
+  // Text/CSV: no magic bytes, but reject binary content (NUL bytes) and embedded HTML/script.
+  if (mimeType === "text/plain" || mimeType === "text/csv") {
+    const head = buffer.subarray(0, Math.min(buffer.length, 8192));
+    if (head.includes(0x00)) return false;
+    const sample = new TextDecoder("utf-8", { fatal: false }).decode(head).toLowerCase();
+    return !/<\s*(script|iframe|object|embed)\b/.test(sample);
+  }
+
+  // Unknown types are rejected by default.
+  return false;
 }
 
 export interface FileValidationResult {
@@ -95,9 +108,12 @@ export function validateDocumentUpload(
   }
 
   // 5. Filename sanitization (prevent path traversal attacks e.g. ../../etc/passwd)
-  const sanitizedFilename = filename
+  const base = filename.split(/[\\/]/).pop() || "upload";
+  const sanitizedFilename = base
     .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/\.+/g, ".");
+    .replace(/\.+/g, ".")
+    .replace(/^\.+/, "")
+    .slice(0, 150) || "upload";
 
   return { isValid: true, sanitizedFilename };
 }

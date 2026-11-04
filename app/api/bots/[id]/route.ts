@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError, getClientIp } from "@/lib/http";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { verifyBotOwnership, recordAuditLog } from "@/lib/auth/guard";
@@ -18,21 +19,25 @@ const updateBotSchema = z.object({
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params;
   try {
     const authCheck = await verifyBotOwnership(params.id, "viewer");
     if (!authCheck.allowed) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 });
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from("chatbots")
       .select("*, widget_settings(*)")
       .eq("id", params.id)
       .single();
 
+    if ((error || !data) && process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Bot not found." }, { status: 404 });
+    }
     if (error || !data) {
       return NextResponse.json({
         bot: {
@@ -58,16 +63,17 @@ export async function GET(
 
     return NextResponse.json({ bot: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "bots.[id]");
   }
 }
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params;
   try {
-    const rateCheck = await checkRateLimit(request.ip || "global-client", "GENERAL_API");
+    const rateCheck = await checkRateLimit(getClientIp(request), "GENERAL_API");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Too many requests. Please try again later." }, { status: 429 });
     }
@@ -80,10 +86,10 @@ export async function PATCH(
     const json = await request.json();
     const parsed = updateBotSchema.safeParse(json);
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid chatbot settings.", issues: parsed.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
     const { data, error } = await supabase
       .from("chatbots")
       .update(parsed.data)
@@ -99,27 +105,31 @@ export async function PATCH(
       metadata: parsed.data,
     });
 
+    if (error && process.env.NODE_ENV === "production") {
+      return serverError(error, "bots.update");
+    }
     if (error) {
       return NextResponse.json({ bot: { id: params.id, ...parsed.data } });
     }
 
     return NextResponse.json({ bot: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "bots.[id]");
   }
 }
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  props: { params: Promise<{ id: string }> }
 ) {
+  const params = await props.params;
   try {
     const authCheck = await verifyBotOwnership(params.id, "owner");
     if (!authCheck.allowed) {
       return NextResponse.json({ error: authCheck.error }, { status: 403 });
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
     await supabase.from("chatbots").delete().eq("id", params.id);
 
     await recordAuditLog({
@@ -131,6 +141,6 @@ export async function DELETE(
 
     return NextResponse.json({ ok: true });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "bots.[id]");
   }
 }

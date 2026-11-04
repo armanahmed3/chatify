@@ -24,3 +24,5 @@ out/
 .agent-reach/
 .claude/settings.local.json
 uv.lock
+tsconfig.tsbuildinfo
+.env.production

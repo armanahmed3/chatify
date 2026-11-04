@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { serverError, getClientIp } from "@/lib/http";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { verifyWorkspaceAccess, recordAuditLog } from "@/lib/auth/guard";
@@ -7,15 +8,15 @@ import { checkRateLimit } from "@/lib/security/ratelimit";
 const createBotSchema = z.object({
   workspace_id: z.string().min(1),
   name: z.string().min(2).max(100),
-  description: z.string().optional(),
-  personality: z.string().optional().default("helpful, professional, and concise"),
-  tone: z.string().optional().default("friendly"),
+  description: z.string().max(500).optional(),
+  personality: z.string().max(200).optional().default("helpful, professional, and concise"),
+  tone: z.string().max(100).optional().default("friendly"),
   temperature: z.number().min(0).max(1).optional().default(0.3),
-  instructions: z.string().optional().default("You are a helpful customer service assistant for our business. Answer accurately from our verified knowledge base. Never invent prices or services."),
-  fallback_message: z.string().optional().default("I don't have the exact details on that right now. Please leave your contact information and our team will get right back to you!"),
-  primary_language: z.string().optional().default("auto"),
-  primary_color: z.string().optional().default("#18181b"),
-  welcome_message: z.string().optional().default("Hi there! 👋 How can we help you today?"),
+  instructions: z.string().max(5000).optional().default("You are a helpful customer service assistant for our business. Answer accurately from our verified knowledge base. Never invent prices or services."),
+  fallback_message: z.string().max(500).optional().default("I don't have the exact details on that right now. Please leave your contact information and our team will get right back to you!"),
+  primary_language: z.string().max(50).optional().default("auto"),
+  primary_color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/).optional().default("#18181b"),
+  welcome_message: z.string().max(500).optional().default("Hi there! 👋 How can we help you today?"),
 });
 
 export async function GET(request: NextRequest) {
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const supabase = createClient();
+    const supabase = await createClient();
     let query = supabase.from("chatbots").select("*, widget_settings(*)");
 
     if (workspaceId) {
@@ -38,6 +39,9 @@ export async function GET(request: NextRequest) {
     }
 
     const { data, error } = await query;
+    if (error && process.env.NODE_ENV === "production") {
+      return serverError(error, "bots.list");
+    }
     if (error) {
       // In development fallback without live Supabase connection
       return NextResponse.json({
@@ -77,13 +81,13 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ bots: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "bots");
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const rateCheck = await checkRateLimit(request.ip || "bot-create", "GENERAL_API");
+    const rateCheck = await checkRateLimit(`bot-create:${getClientIp(request)}`, "GENERAL_API");
     if (!rateCheck.success) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
@@ -92,7 +96,7 @@ export async function POST(request: NextRequest) {
     const parsed = createBotSchema.safeParse(json);
 
     if (!parsed.success) {
-      return NextResponse.json({ error: parsed.error.format() }, { status: 400 });
+      return NextResponse.json({ error: "Invalid chatbot settings.", issues: parsed.error.flatten().fieldErrors }, { status: 400 });
     }
 
     const {
@@ -109,11 +113,14 @@ export async function POST(request: NextRequest) {
       welcome_message,
     } = parsed.data;
 
-    const supabase = createClient();
+    const supabase = await createClient();
 
     // Ensure valid UUID for PostgreSQL column
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspace_id);
     let resolvedWorkspaceId = workspace_id;
+    if (!isUuid && process.env.NODE_ENV === "production") {
+      return NextResponse.json({ error: "Invalid workspace_id." }, { status: 400 });
+    }
     if (!isUuid) {
       const { data: firstWs } = await supabase.from("workspaces").select("id").limit(1).maybeSingle();
       resolvedWorkspaceId = firstWs?.id || "5d6b5093-e906-4a70-b29b-5726053d2c79";
@@ -143,6 +150,9 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
+    if (botError && process.env.NODE_ENV === "production") {
+      return serverError(botError, "bots.create");
+    }
     if (botError) {
       // Return simulated bot in local/offline mode
       const simulatedBot = {
@@ -173,6 +183,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ bot }, { status: 201 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return serverError(err, "bots");
   }
 }

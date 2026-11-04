@@ -32,7 +32,7 @@ export async function getAuthenticatedUser(): Promise<AuthContext | null> {
     process.env.NEXT_PUBLIC_SUPABASE_URL.includes("your-project");
 
   try {
-    const supabase = createClient();
+    const supabase = await createClient();
     const {
       data: { user },
       error,
@@ -99,7 +99,7 @@ export async function verifyWorkspaceAccess(
     return { allowed: true, role: "owner", user };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: membership, error } = await supabase
     .from("workspace_members")
     .select("role")
@@ -149,7 +149,7 @@ export async function verifyBotOwnership(
     return { allowed: true, user };
   }
 
-  const supabase = createClient();
+  const supabase = await createClient();
   const { data: bot, error: botError } = await supabase
     .from("chatbots")
     .select("*, widget_settings(*)")
