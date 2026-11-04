@@ -10,9 +10,6 @@ interface WorkspaceContextType {
   updateActiveWorkspace: (updates: Partial<Workspace>) => void;
   createWorkspace: (name: string, avgValue?: number) => Workspace;
   currentRole: "owner" | "admin" | "agent" | "viewer";
-  uiMode: "simple" | "pro";
-  setUiMode: (mode: "simple" | "pro") => void;
-  toggleUiMode: () => void;
   isTestDrawerOpen: boolean;
   setIsTestDrawerOpen: (open: boolean) => void;
   isMobileSidebarOpen: boolean;
@@ -43,7 +40,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   const [activeWorkspace, setActiveWorkspaceState] = useState<Workspace>(BASELINE_WORKSPACE);
   const [workspaces, setWorkspacesState] = useState<Workspace[]>([BASELINE_WORKSPACE]);
   const [currentRole, setCurrentRole] = useState<"owner" | "admin" | "agent" | "viewer">("owner");
-  const [uiMode, setUiModeState] = useState<"simple" | "pro">("simple");
   const [isTestDrawerOpen, setIsTestDrawerOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -51,12 +47,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
   // Hydrate user workspace dynamically from client storage & active session
   useEffect(() => {
     try {
-      // 1. Restore UI Mode
-      const savedMode = localStorage.getItem("chatify_ui_mode") as "simple" | "pro" | null;
-      if (savedMode === "simple" || savedMode === "pro") {
-        setUiModeState(savedMode);
-      }
-
       // 2. Restore Active Workspace
       const savedActiveWs = localStorage.getItem("chatify_active_workspace");
       if (savedActiveWs) {
@@ -108,18 +98,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem("chatify_user_workspaces", JSON.stringify(list));
     } catch {}
-  };
-
-  const setUiMode = (mode: "simple" | "pro") => {
-    setUiModeState(mode);
-    try {
-      localStorage.setItem("chatify_ui_mode", mode);
-    } catch {}
-  };
-
-  const toggleUiMode = () => {
-    const next = uiMode === "simple" ? "pro" : "simple";
-    setUiMode(next);
   };
 
   const updateActiveWorkspace = (updates: Partial<Workspace>) => {
@@ -191,9 +169,6 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
         updateActiveWorkspace,
         createWorkspace,
         currentRole,
-        uiMode,
-        setUiMode,
-        toggleUiMode,
         isTestDrawerOpen,
         setIsTestDrawerOpen,
         isMobileSidebarOpen,

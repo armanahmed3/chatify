@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/components/dashboard/workspace-provider";
 import { INDUSTRY_TEMPLATES, IndustryTemplate } from "@/lib/templates";
+import { getEmbedSnippet } from "@/lib/embed";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,9 +33,12 @@ import {
 
 function ChatbotBuilderContent() {
   const searchParams = useSearchParams();
-  const { activeWorkspace, uiMode, toggleUiMode } = useWorkspace();
+  const { activeWorkspace } = useWorkspace();
   const isDemo = activeWorkspace.id === "ws-demo-001";
-  const [activeTab, setActiveTab] = useState<"general" | "personality" | "appearance" | "language" | "embed">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "personality" | "appearance" | "language" | "embed">(() => {
+    const t = searchParams.get("tab");
+    return t === "personality" || t === "appearance" || t === "language" || t === "embed" ? t : "general";
+  });
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("tpl-dental");
   const [templateNotice, setTemplateNotice] = useState<string | null>(null);
@@ -70,7 +74,7 @@ function ChatbotBuilderContent() {
   const [saved, setSaved] = useState(false);
 
   const botSlug = botName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "demo-apex";
-  const embedSnippet = `<script src="https://chatify.ai/widget.js" data-bot-id="${botSlug}" data-color="${primaryColor}" data-text-color="#ffffff" data-brand="${botName}" defer></script>`;
+  const embedSnippet = getEmbedSnippet(botSlug, primaryColor);
 
   // Live simulation chat inside builder
   const [testInput, setTestInput] = useState("");
@@ -261,39 +265,7 @@ function ChatbotBuilderContent() {
               </option>
             ))}
           </select>
-          <Link href="/dashboard/templates">
-            <Button variant="outline" size="sm" className="h-8 text-xs font-semibold gap-1">
-              <span>All Templates</span>
-              <ArrowRight className="h-3 w-3" />
-            </Button>
-          </Link>
         </div>
-      </div>
-
-      {/* Simple vs Pro Mode Helper */}
-      <div className="rounded-xl border border-border/70 bg-card p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
-        <div className="flex items-center gap-2">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent/15 text-accent text-xs font-bold">
-            {uiMode === "simple" ? "✨" : "⚙️"}
-          </span>
-          <span className="text-xs text-foreground font-medium">
-            {uiMode === "simple" ? (
-              <>
-                <strong>Simple View:</strong> Easy setup for your bot name, greeting, quick questions & appearance.
-              </>
-            ) : (
-              <>
-                <strong>Pro View:</strong> Full system prompt, temperature tuning, and webhook endpoints exposed.
-              </>
-            )}
-          </span>
-        </div>
-        <button
-          onClick={toggleUiMode}
-          className="text-xs text-accent hover:underline font-bold shrink-0 self-start sm:self-center"
-        >
-          {uiMode === "simple" ? "Switch to Pro View →" : "Switch to Simple View →"}
-        </button>
       </div>
 
       {/* Top Header */}

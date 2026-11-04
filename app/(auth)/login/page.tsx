@@ -90,9 +90,9 @@ export default function LoginPage() {
         <div className="mx-auto mb-1 flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent">
           <ShieldCheck className="h-5 w-5" />
         </div>
-        <CardTitle className="text-2xl font-bold tracking-tight">Sign In to Chatify</CardTitle>
+        <CardTitle className="text-2xl font-bold tracking-tight">Sign in</CardTitle>
         <CardDescription className="text-xs text-muted-foreground">
-          Enter your authorized credentials to access your dashboard
+          Welcome back. Enter your email and password.
         </CardDescription>
       </CardHeader>
       <CardContent>

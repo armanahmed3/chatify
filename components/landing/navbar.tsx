@@ -58,9 +58,6 @@ export function LandingNavbar() {
           <Link href="#features" className="text-muted-foreground transition-colors hover:text-foreground">
             Features
           </Link>
-          <Link href="#channels" className="text-muted-foreground transition-colors hover:text-foreground">
-            WhatsApp & Social
-          </Link>
           <Link href="#pricing" className="text-muted-foreground transition-colors hover:text-foreground">
             Pricing
           </Link>
@@ -118,13 +115,6 @@ export function LandingNavbar() {
               className="flex items-center rounded-lg px-3 py-3 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors min-h-[44px]"
             >
               Features
-            </Link>
-            <Link
-              href="#channels"
-              onClick={() => setIsMenuOpen(false)}
-              className="flex items-center rounded-lg px-3 py-3 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors min-h-[44px]"
-            >
-              WhatsApp & Social
             </Link>
             <Link
               href="#pricing"

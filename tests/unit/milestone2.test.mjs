@@ -29,7 +29,7 @@ test("Milestone 2 — Workspace Schema Validation", () => {
 });
 
 test("Milestone 2 — Non-Technical Customer Rule (No 'API key' in Onboarding/Signup/Pricing)", () => {
-  const onboardingFile = path.resolve(process.cwd(), "components/dashboard/onboarding-checklist.tsx");
+  const onboardingFile = path.resolve(process.cwd(), "app/dashboard/page.tsx");
   const signupFile = path.resolve(process.cwd(), "app/(auth)/signup/page.tsx");
   const pricingFile = path.resolve(process.cwd(), "components/landing/pricing.tsx");
 
@@ -40,7 +40,7 @@ test("Milestone 2 — Non-Technical Customer Rule (No 'API key' in Onboarding/Si
   assert.equal(
     onboardingContent.toLowerCase().includes("api key"),
     false,
-    "Onboarding checklist must NEVER contain 'api key'"
+    "Dashboard home must NEVER contain 'api key'"
   );
   assert.equal(
     signupContent.toLowerCase().includes("api key"),

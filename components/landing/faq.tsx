@@ -8,28 +8,24 @@ export function LandingFAQ() {
 
   const faqs = [
     {
-      q: "Do I need to sign up for OpenAI or enter any API keys?",
-      a: "No! Chatify runs on our central, lifetime-free AI routing infrastructure. You will never be asked to create an OpenAI account, pay token bills, or touch API keys.",
+      q: "Do I need any technical skills?",
+      a: "No. You fill in a few forms and copy one line of code into your website. If someone else manages your website, send them that line.",
     },
     {
-      q: "What happens if a customer asks a question not on my website?",
-      a: "Our Zero-Hallucination guard ensures the chatbot never invents false prices, hours, or services. Instead, it politely tells the customer it doesn't have that specific detail and offers to capture their phone number or email so you can reply personally.",
+      q: "Do I need my own AI or API account?",
+      a: "No. Everything runs on our side. You don't need to sign up anywhere else.",
     },
     {
-      q: "How does the flat pricing work? Are there really no message fees?",
-      a: "Yes. Unlike Chatbase or CustomGPT who charge per message, Chatify plans are 100% flat. All FAQ and instant answers are unlimited and cost $0. Real smart AI chats are capped at your generous plan limit (e.g. 2,000/mo on Starter). If your limit is reached, your bot gracefully continues taking customer contact details without shutting down.",
+      q: "What if a customer asks something the chatbot doesn't know?",
+      a: "It tells them it doesn't have that information and asks for their name and phone number or email, so you can get back to them.",
     },
     {
-      q: "Can I connect WhatsApp, Instagram, and Facebook Messenger?",
-      a: "Yes! On our Pro plan and above, you can connect your official WhatsApp Cloud API number, Instagram DMs, and Facebook Messenger page. All customer conversations flow into your single Chatify unified inbox.",
+      q: "Can I see what customers are asking?",
+      a: "Yes. Every conversation is saved in your dashboard, and you can reply yourself.",
     },
     {
-      q: "Can my team take over the chat live when we are online?",
-      a: "Absolutely. With 1-click Human Takeover, any conversation can be answered live by your staff. The AI bot pauses instantly and will only resume if you hand it back.",
-    },
-    {
-      q: "Does the chatbot support Urdu, Arabic, and other languages?",
-      a: "Yes! Chatify detects the visitor's language automatically and responds natively in over 95 languages, including full Right-to-Left (RTL) text alignment for Urdu and Arabic.",
+      q: "Is there a free trial?",
+      a: "Yes, 7 days with no credit card. After that you can pick a monthly plan or stop.",
     },
   ];
 

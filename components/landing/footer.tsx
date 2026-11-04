@@ -32,7 +32,7 @@ export function LandingFooter() {
           </div>
 
           <div>
-            © {new Date().getFullYear()} Chatify Inc. All rights reserved.
+            © {new Date().getFullYear()} Chatify
           </div>
         </div>
       </div>
